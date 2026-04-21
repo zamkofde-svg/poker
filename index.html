@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Покер 🃏</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e6edf3;min-height:100vh;-webkit-tap-highlight-color:transparent}
+.screen{display:none;padding:16px 16px 90px;max-width:480px;margin:0 auto}
+.screen.active{display:block}
+h2{font-size:20px;font-weight:700;margin-bottom:16px}
+.btn{display:block;width:100%;padding:14px 16px;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px;transition:transform .1s,opacity .1s;-webkit-user-select:none;user-select:none}
+.btn:active{transform:scale(.97);opacity:.9}
+.btn-green{background:#238636;color:#fff}
+.btn-red{background:#da3633;color:#fff}
+.btn-blue{background:#1f6feb;color:#fff}
+.btn-ghost{background:#21262d;color:#e6edf3;border:1px solid #30363d}
+.btn-sm{display:inline-block;width:auto;padding:7px 14px;font-size:13px;margin-bottom:0;border-radius:8px}
+input[type=text],input[type=number],select{width:100%;padding:12px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:16px;margin-bottom:10px;outline:none;-webkit-appearance:none;appearance:none}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield}
+input:focus,select:focus{border-color:#388bfd}
+select option{background:#161b22}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:14px;margin-bottom:10px}
+.topbar{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.topbar h2{margin-bottom:0;flex:1}
+.back-btn{background:none;border:none;color:#388bfd;font-size:15px;cursor:pointer;padding:4px 0;margin-bottom:12px;display:flex;align-items:center;gap:4px}
+.player-row{display:flex;align-items:center;gap:10px;background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px;margin-bottom:8px}
+.player-row.dim{opacity:.4}
+.player-main{flex:1;min-width:0}
+.player-name{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.player-sub{font-size:13px;color:#7d8590;margin-top:2px}
+.player-actions{display:flex;gap:6px;flex-shrink:0}
+.stat-bar{display:flex;gap:0;background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px 14px;margin-bottom:12px}
+.stat-item{flex:1;text-align:center}
+.stat-val{font-size:18px;font-weight:700}
+.stat-lbl{font-size:12px;color:#7d8590;margin-top:2px}
+.stat-div{width:1px;background:#30363d;margin:0 4px}
+.section-label{font-size:12px;font-weight:600;color:#7d8590;text-transform:uppercase;letter-spacing:.8px;margin:16px 0 8px}
+.timer-card{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:20px;text-align:center;margin-bottom:12px}
+.timer-level{font-size:13px;color:#7d8590;margin-bottom:4px}
+.timer-blinds{font-size:32px;font-weight:800;color:#ffa657;letter-spacing:1px;margin-bottom:10px}
+.timer-time{font-size:52px;font-weight:700;font-family:'Courier New',monospace;line-height:1}
+.timer-time.ok{color:#3fb950}
+.timer-time.warn{color:#ffa657}
+.timer-time.urgent{color:#f85149;animation:pulse .5s ease infinite alternate}
+@keyframes pulse{from{opacity:1}to{opacity:.4}}
+.timer-next{font-size:13px;color:#7d8590;margin-top:8px}
+.timer-controls{display:flex;gap:8px;margin-bottom:12px}
+.timer-controls .btn{margin-bottom:0}
+.net-pos{color:#3fb950;font-weight:700;font-size:17px}
+.net-neg{color:#f85149;font-weight:700;font-size:17px}
+.net-zero{color:#7d8590;font-weight:600;font-size:17px}
+.transfer-item{display:flex;align-items:center;padding:13px 0;border-bottom:1px solid #21262d}
+.transfer-item:last-child{border-bottom:none}
+.transfer-names{flex:1}
+.tf-from{font-weight:600}
+.tf-arrow{color:#7d8590;font-size:13px}
+.tf-to{color:#388bfd;font-weight:600}
+.tf-amt{font-weight:700;color:#3fb950;font-size:18px}
+.prize-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.prize-label{font-size:15px;font-weight:600;width:90px;flex-shrink:0}
+.prize-row input,.prize-row select{margin-bottom:0}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:50;align-items:flex-end;justify-content:center;padding:16px}
+.modal-overlay.open{display:flex}
+.modal-box{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:20px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto}
+.modal-box h3{margin-bottom:14px;font-size:17px}
+.blind-table{width:100%;border-collapse:collapse;font-size:14px}
+.blind-table th,.blind-table td{padding:8px 6px;text-align:center;border-bottom:1px solid #21262d}
+.blind-table th{color:#7d8590;font-weight:600;font-size:12px}
+.blind-table .row-cur td{color:#ffa657;font-weight:700;background:#1c1710}
+.blind-table .row-addon td{background:#111822;color:#388bfd}
+.home-logo{text-align:center;padding:48px 0 32px}
+.home-logo .cards{font-size:60px}
+.home-logo .title{font-size:34px;font-weight:800;margin-top:8px}
+.home-logo .sub{font-size:15px;color:#7d8590;margin-top:4px}
+.num-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#30363d;border-radius:50%;font-size:12px;font-weight:700;color:#7d8590;flex-shrink:0}
+.info-box{background:#111822;border:1px solid #1f3d5e;border-radius:8px;padding:12px;margin-bottom:10px;font-size:14px;color:#7d8590}
+.info-box strong{color:#e6edf3}
+.addon-btns{display:flex;gap:8px;flex-wrap:wrap}
+.addon-btns .btn{flex:1;margin-bottom:0;min-width:80px;padding:12px 8px;font-size:14px}
+.btn-selected-green{background:#1a4d2e;color:#3fb950;border:2px solid #3fb950}
+.btn-selected-gray{background:#21262d;color:#7d8590;border:2px solid #7d8590}
+.chip-warning{background:#2a1500;border:1px solid #9e5a00;border-radius:8px;padding:12px;margin-bottom:12px;font-size:14px;color:#ffa657}
+.cashout-badge{display:inline-block;padding:3px 10px;border-radius:6px;font-size:13px;font-weight:600}
+.cashout-pos{background:#0d2b12;color:#3fb950;border:1px solid #2ea043}
+.cashout-neg{background:#2a0a0a;color:#f85149;border:1px solid #da3633}
+.cashout-zero{background:#161b22;color:#7d8590;border:1px solid #30363d}
+.input-row{display:flex;gap:8px}
+.input-row input{flex:1;margin-bottom:0}
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<div class="screen active" id="s-home">
+  <div class="home-logo">
+    <div class="cards">🃏</div>
+    <div class="title">Покер</div>
+    <div class="sub">Расчёты без головной боли</div>
+  </div>
+  <button class="btn btn-green" onclick="nav('s-setup',initCash)">💰 Кэш-игра</button>
+  <button class="btn btn-ghost" onclick="nav('s-setup',initTournament)">🏆 Турнир</button>
+</div>
+
+<!-- SETUP -->
+<div class="screen" id="s-setup">
+  <button class="back-btn" onclick="nav('s-home')">← Назад</button>
+  <h2 id="setup-title">Игроки</h2>
+  <div class="input-row" style="margin-bottom:10px">
+    <input type="text" id="player-input" placeholder="Имя игрока" maxlength="16"
+      onkeydown="if(event.key==='Enter')addPlayer()">
+    <button class="btn btn-blue btn-sm" onclick="addPlayer()">Добавить</button>
+  </div>
+  <div id="setup-list"></div>
+  <div class="card" id="setup-buyin-row" style="display:none;margin-top:4px">
+    <div style="font-size:14px;color:#7d8590;margin-bottom:8px">Стартовый закуп</div>
+    <div class="input-row">
+      <input type="number" id="setup-buyin" value="300" inputmode="numeric" style="margin-bottom:0">
+      <span style="display:flex;align-items:center;color:#7d8590;font-size:14px;flex-shrink:0">₽</span>
+    </div>
+  </div>
+  <button class="btn btn-green" id="setup-start" onclick="startGame()" style="margin-top:14px;display:none">Начать →</button>
+</div>
+
+<!-- CASH GAME -->
+<div class="screen" id="s-cash">
+  <div class="topbar">
+    <h2>💰 Кэш-игра</h2>
+    <button class="btn btn-red btn-sm" onclick="endCashGame()">Финал</button>
+  </div>
+  <div class="stat-bar" id="cash-stats">
+    <div class="stat-item"><div class="stat-val" id="cash-bank">0 ₽</div><div class="stat-lbl">В банке</div></div>
+    <div class="stat-div"></div>
+    <div class="stat-item"><div class="stat-val" id="cash-active">0</div><div class="stat-lbl">За столом</div></div>
+    <div class="stat-div"></div>
+    <div class="stat-item"><div class="stat-val" id="cash-buyin-cnt">0</div><div class="stat-lbl">Закупов</div></div>
+  </div>
+  <div id="cash-list"></div>
+</div>
+
+<!-- TOURNAMENT -->
+<div class="screen" id="s-tourn">
+  <div class="timer-card">
+    <div class="timer-level" id="t-level">Уровень 1 / 12</div>
+    <div class="timer-blinds" id="t-blinds">5 / 10</div>
+    <div class="timer-time ok" id="t-time">10:00</div>
+    <div class="timer-next" id="t-next">Следующий: 5 / 15</div>
+  </div>
+  <div class="timer-controls">
+    <button class="btn btn-green" id="t-playbtn" onclick="toggleTimer()" style="flex:2;margin-bottom:0">▶ Старт</button>
+    <button class="btn btn-ghost" onclick="openBlindsModal()" style="flex:1;margin-bottom:0">📋 Уровни</button>
+  </div>
+  <div class="stat-bar" style="margin-top:4px">
+    <div class="stat-item"><div class="stat-val" id="t-bank">0 ₽</div><div class="stat-lbl">Банк</div></div>
+    <div class="stat-div"></div>
+    <div class="stat-item"><div class="stat-val" id="t-active">0</div><div class="stat-lbl">Активных</div></div>
+    <div class="stat-div"></div>
+    <div class="stat-item"><div class="stat-val" id="t-out">0</div><div class="stat-lbl">Вылетело</div></div>
+  </div>
+  <div class="section-label">Игроки</div>
+  <div id="t-list"></div>
+  <button class="btn btn-ghost" id="t-addon-btn" onclick="goAddon()">🎰 Перейти к аддону</button>
+  <button class="btn btn-red" id="t-end-btn" onclick="nav('s-prizes',initPrizes)" style="display:none">🏁 Конец игры → Призы</button>
+</div>
+
+<!-- ADDON -->
+<div class="screen" id="s-addon">
+  <h2>🎰 Аддон</h2>
+  <div id="addon-list"></div>
+  <button class="btn btn-green" onclick="finishAddon()">Готово → Продолжить игру</button>
+</div>
+
+<!-- PRIZES -->
+<div class="screen" id="s-prizes">
+  <h2>🏆 Призы</h2>
+  <div class="stat-bar">
+    <div class="stat-item"><div class="stat-val" id="prize-total-v">0 ₽</div><div class="stat-lbl">Собрано</div></div>
+    <div class="stat-div"></div>
+    <div class="stat-item"><div class="stat-val" id="prize-pool-v">0 ₽</div><div class="stat-lbl">Призовой фонд</div></div>
+  </div>
+
+  <div class="section-label">Фонд (карты, еда и тд)</div>
+  <div class="card">
+    <div class="input-row">
+      <input type="number" id="prize-fund" value="0" placeholder="0" inputmode="numeric" oninput="calcPrizes()" style="margin-bottom:0">
+      <span style="display:flex;align-items:center;color:#7d8590;font-size:14px;flex-shrink:0">₽</span>
+    </div>
+  </div>
+
+  <div class="section-label">Призовые места</div>
+  <div class="card">
+    <div class="prize-row"><span class="prize-label">🥇 1 место</span><input type="number" id="prize-p1" placeholder="0" inputmode="numeric" oninput="calcPrizes()"></div>
+    <div class="prize-row"><span class="prize-label">🥈 2 место</span><input type="number" id="prize-p2" placeholder="0" inputmode="numeric" oninput="calcPrizes()"></div>
+    <div class="prize-row"><span class="prize-label">🥉 3 место</span><input type="number" id="prize-p3" placeholder="0" inputmode="numeric" oninput="calcPrizes()"></div>
+    <div id="prize-check" style="font-size:13px;margin-top:2px"></div>
+  </div>
+
+  <div class="section-label">Победители</div>
+  <div class="card">
+    <div class="prize-row"><span class="prize-label">🥇 1 место</span><select id="win-1"><option value="">— выбери —</option></select></div>
+    <div class="prize-row"><span class="prize-label">🥈 2 место</span><select id="win-2"><option value="">— выбери —</option></select></div>
+    <div class="prize-row"><span class="prize-label">🥉 3 место</span><select id="win-3"><option value="">— выбери —</option></select></div>
+  </div>
+  <button class="btn btn-green" onclick="calcTournamentResult()">Рассчитать →</button>
+</div>
+
+<!-- SETTLEMENT -->
+<div class="screen" id="s-settle">
+  <h2 id="settle-title">Расчёт</h2>
+  <div id="settle-note"></div>
+  <div class="section-label">Итог</div>
+  <div id="settle-summary"></div>
+  <div class="section-label" style="margin-top:16px">Кто кому переводит</div>
+  <div class="card" id="settle-transfers"></div>
+  <button class="btn btn-ghost" onclick="nav('s-home')" style="margin-top:20px">← Новая игра</button>
+</div>
+
+<!-- MODALS -->
+<div class="modal-overlay" id="m-buyin">
+  <div class="modal-box">
+    <h3>Закуп — <span id="m-buyin-name"></span></h3>
+    <input type="number" id="m-buyin-amt" placeholder="Сумма в рублях" value="300" inputmode="numeric">
+    <button class="btn btn-green" onclick="confirmBuyin()">Добавить</button>
+    <button class="btn btn-ghost" onclick="closeModal('m-buyin')">Отмена</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="m-cashout">
+  <div class="modal-box">
+    <h3>Выход — <span id="m-cashout-name"></span></h3>
+    <div style="font-size:14px;color:#7d8590;margin-bottom:8px">Фишки на руках</div>
+    <input type="number" id="m-cashout-chips" placeholder="Количество фишек" inputmode="numeric" oninput="updateCashoutHint()">
+    <div id="m-cashout-hint" style="font-size:14px;margin-bottom:10px;min-height:20px"></div>
+    <button class="btn btn-green" onclick="confirmCashout()">Подтвердить</button>
+    <button class="btn btn-ghost" onclick="closeModal('m-cashout')">Отмена</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="m-rebuy">
+  <div class="modal-box">
+    <h3>Рибай — <span id="m-rebuy-name"></span></h3>
+    <div class="info-box">300 ₽ = 3000 фишек</div>
+    <button class="btn btn-green" onclick="confirmRebuy()">Рибай +300 ₽</button>
+    <button class="btn btn-ghost" onclick="closeModal('m-rebuy')">Отмена</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="m-blinds">
+  <div class="modal-box">
+    <h3>Структура блайндов</h3>
+    <div style="overflow-x:auto"><table class="blind-table" id="blinds-tbl"></table></div>
+    <button class="btn btn-ghost" style="margin-top:14px" onclick="closeModal('m-blinds')">Закрыть</button>
+  </div>
+</div>
+
+<script>
+// ── BLIND STRUCTURE ──────────────────────────────────────
+const BLINDS = [
+  {sb:5,   bb:10},  // 1
+  {sb:5,   bb:15},  // 2
+  {sb:10,  bb:20},  // 3
+  {sb:10,  bb:25},  // 4
+  {sb:15,  bb:30},  // 5
+  {sb:20,  bb:40},  // 6
+  {sb:25,  bb:50},  // 7
+  {sb:30,  bb:60},  // 8
+  {sb:40,  bb:80},  // 9
+  {sb:50,  bb:100}, // 10
+  {sb:60,  bb:120}, // 11
+  {sb:75,  bb:150}, // 12 ← ADDON after this level
+  // post-addon
+  {sb:100, bb:200},
+  {sb:150, bb:300},
+  {sb:200, bb:400},
+  {sb:300, bb:600},
+  {sb:500, bb:1000},
+  {sb:750, bb:1500},
+  {sb:1000,bb:2000},
+  {sb:1500,bb:3000},
+];
+const ADDON_AFTER = 12; // addon triggers after level index 11
+const LEVEL_SECS  = 600;
+
+// ── STATE ────────────────────────────────────────────────
+const G = {
+  mode: null,
+  players: [],
+  timer: {lvl:0, secs:LEVEL_SECS, running:false, iv:null},
+  addonDone: false,
+  _mi: null, // modal target index
+};
+
+// ── NAV ──────────────────────────────────────────────────
+function nav(id, cb) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0,0);
+  if (cb) cb();
+}
+
+// ── SETUP ────────────────────────────────────────────────
+function initCash() {
+  G.mode = 'cash'; G.players = [];
+  document.getElementById('setup-title').textContent = '💰 Кэш — Игроки';
+  document.getElementById('setup-buyin-row').style.display = 'block';
+  renderSetup();
+}
+function initTournament() {
+  G.mode = 'tournament'; G.players = []; G.addonDone = false;
+  if (G.timer.iv) clearInterval(G.timer.iv);
+  G.timer = {lvl:0, secs:LEVEL_SECS, running:false, iv:null};
+  document.getElementById('setup-title').textContent = '🏆 Турнир — Игроки';
+  document.getElementById('setup-buyin-row').style.display = 'none';
+  renderSetup();
+}
+function addPlayer() {
+  const inp = document.getElementById('player-input');
+  const name = inp.value.trim();
+  if (!name || G.players.find(p=>p.name===name)) return;
+  G.players.push({name,buyins:[],chips:null,cashedOut:false,rebuys:0,addon:0,eliminated:false,prize:0});
+  inp.value = ''; inp.focus();
+  renderSetup();
+}
+function removeSetupPlayer(i) { G.players.splice(i,1); renderSetup(); }
+function renderSetup() {
+  document.getElementById('setup-list').innerHTML = G.players.map((p,i) => `
+    <div class="player-row">
+      <span class="num-badge">${i+1}</span>
+      <div class="player-main"><span class="player-name">${esc(p.name)}</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="removeSetupPlayer(${i})">✕</button>
+    </div>`).join('');
+  document.getElementById('setup-start').style.display = G.players.length >= 2 ? 'block' : 'none';
+}
+function startGame() {
+  if (G.players.length < 2) return;
+  if (G.mode === 'cash') {
+    const b = parseInt(document.getElementById('setup-buyin').value) || 300;
+    G.players.forEach(p => p.buyins = [b]);
+    nav('s-cash'); renderCash();
+  } else {
+    G.players.forEach(p => { p.buyins=[300]; p.rebuys=0; p.addon=0; p.eliminated=false; });
+    nav('s-tourn'); renderTourn(); updateTimerUI();
+  }
+}
+
+// ── CASH ─────────────────────────────────────────────────
+function paid(p)   { return p.buyins.reduce((s,b)=>s+b,0); }
+function bankCash() { return G.players.reduce((s,p)=>s+paid(p),0); }
+function bankTourn(){ return G.players.reduce((s,p)=>s+paid(p)+p.rebuys*300+p.addon,0); }
+
+function renderCash() {
+  const bank = bankCash();
+  const active = G.players.filter(p=>!p.cashedOut).length;
+  const cnt = G.players.reduce((s,p)=>s+p.buyins.length,0);
+  document.getElementById('cash-bank').textContent = bank + ' ₽';
+  document.getElementById('cash-active').textContent = active;
+  document.getElementById('cash-buyin-cnt').textContent = cnt;
+  document.getElementById('cash-list').innerHTML = G.players.map((p,i) => {
+    const p2 = paid(p);
+    let right = '';
+    if (p.cashedOut) {
+      const rub = Math.round(p.chips/2);
+      const net = rub - p2;
+      const cls = net>0?'cashout-pos':net<0?'cashout-neg':'cashout-zero';
+      right = `<span class="cashout-badge ${cls}">${net>0?'+':''}${net} ₽</span>`;
+    } else {
+      right = `<button class="btn btn-ghost btn-sm" onclick="openBuyin(${i})">+ Закуп</button>
+               <button class="btn btn-green btn-sm" onclick="openCashout(${i})">Выйти</button>`;
+    }
+    return `<div class="player-row${p.cashedOut?' dim':''}">
+      <div class="player-main">
+        <div class="player-name">${p.cashedOut?'✓ ':''}${esc(p.name)}</div>
+        <div class="player-sub">${p2} ₽ · ${p.buyins.length} закуп(а)</div>
+      </div>
+      <div class="player-actions">${right}</div>
+    </div>`;
+  }).join('');
+}
+
+function openBuyin(i) {
+  G._mi = i;
+  document.getElementById('m-buyin-name').textContent = G.players[i].name;
+  document.getElementById('m-buyin-amt').value = 300;
+  openModal('m-buyin');
+}
+function confirmBuyin() {
+  const amt = parseInt(document.getElementById('m-buyin-amt').value)||0;
+  if (amt<=0) return;
+  G.players[G._mi].buyins.push(amt);
+  closeModal('m-buyin'); renderCash();
+}
+function openCashout(i) {
+  G._mi = i;
+  document.getElementById('m-cashout-name').textContent = G.players[i].name;
+  document.getElementById('m-cashout-chips').value = '';
+  document.getElementById('m-cashout-hint').textContent = '';
+  openModal('m-cashout');
+}
+function updateCashoutHint() {
+  const chips = parseInt(document.getElementById('m-cashout-chips').value)||0;
+  const p = G.players[G._mi];
+  const rub = Math.round(chips/2);
+  const net = rub - paid(p);
+  const el = document.getElementById('m-cashout-hint');
+  if (chips > 0) {
+    el.textContent = `${chips} фишек = ${rub} ₽ → ${net>=0?'+':''}${net} ₽`;
+    el.style.color = net>=0 ? '#3fb950' : '#f85149';
+  } else { el.textContent = ''; }
+}
+function confirmCashout() {
+  const chips = parseInt(document.getElementById('m-cashout-chips').value);
+  if (isNaN(chips)||chips<0) return;
+  G.players[G._mi].chips = chips;
+  G.players[G._mi].cashedOut = true;
+  closeModal('m-cashout'); renderCash();
+}
+function endCashGame() {
+  const rem = G.players.filter(p=>!p.cashedOut);
+  for (const p of rem) {
+    const v = prompt(`Фишки у ${p.name}:`);
+    if (v === null) return;
+    p.chips = parseInt(v)||0; p.cashedOut = true;
+  }
+  const chipsIn  = G.players.reduce((s,p) => s + paid(p)*2, 0);
+  const chipsOut = G.players.reduce((s,p) => s + (p.chips||0), 0);
+  const chipDiff = chipsIn - chipsOut;
+  const note = chipDiff !== 0
+    ? `⚠️ Расхождение ${Math.abs(chipDiff)} фишек (${Math.abs(chipDiff/2)} ₽) — ${chipDiff > 0 ? 'недостача' : 'лишние фишки'}, кто-то пересчитал неверно`
+    : null;
+  const summaries = G.players.map(p => {
+    const p2 = paid(p), rub = Math.round((p.chips||0)/2);
+    return {name:p.name, sub:`Закупы ${p2} ₽  •  Кэш-аут ${rub} ₽`, net:rub-p2};
+  });
+  const bal = {};
+  G.players.forEach(p => { bal[p.name] = Math.round((p.chips||0)/2) - paid(p); });
+  showSettle('💰 Кэш — Расчёт', summaries, bal, note);
+}
+
+// ── TOURNAMENT ───────────────────────────────────────────
+function renderTourn() {
+  const bank = bankTourn();
+  const active = G.players.filter(p=>!p.eliminated).length;
+  const out = G.players.filter(p=>p.eliminated).length;
+  document.getElementById('t-bank').textContent = bank + ' ₽';
+  document.getElementById('t-active').textContent = active;
+  document.getElementById('t-out').textContent = out;
+  document.getElementById('t-list').innerHTML = G.players.map((p,i) => {
+    const p2 = paid(p)+p.rebuys*300+p.addon;
+    const right = p.eliminated
+      ? `<button class="btn btn-ghost btn-sm" onclick="openRebuy(${i})">Рибай</button>`
+      : `<button class="btn btn-red btn-sm" onclick="elimPlayer(${i})">Вылет</button>`;
+    const sub = `${p2} ₽${p.rebuys>0?` · ${p.rebuys}× рибай`:''}${p.addon>0?` · аддон ${p.addon} ₽`:''}`;
+    return `<div class="player-row${p.eliminated?' dim':''}">
+      <div class="player-main">
+        <div class="player-name">${p.eliminated?'❌ ':''}${esc(p.name)}</div>
+        <div class="player-sub">${sub}</div>
+      </div>
+      <div class="player-actions">${right}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('t-addon-btn').style.display = G.addonDone ? 'none' : 'block';
+  document.getElementById('t-end-btn').style.display   = G.addonDone ? 'block' : 'none';
+}
+function elimPlayer(i) { G.players[i].eliminated = true; renderTourn(); }
+function openRebuy(i) {
+  G._mi = i;
+  document.getElementById('m-rebuy-name').textContent = G.players[i].name;
+  openModal('m-rebuy');
+}
+function confirmRebuy() {
+  G.players[G._mi].rebuys++;
+  G.players[G._mi].eliminated = false;
+  closeModal('m-rebuy'); renderTourn();
+  document.getElementById('t-bank').textContent = bankTourn() + ' ₽';
+}
+
+// ── TIMER ────────────────────────────────────────────────
+function updateTimerUI() {
+  const {lvl, secs} = G.timer;
+  const blind = BLINDS[Math.min(lvl, BLINDS.length-1)];
+  const isPreAddon = lvl < ADDON_AFTER;
+  document.getElementById('t-level').textContent = isPreAddon
+    ? `Уровень ${lvl+1} / ${ADDON_AFTER}` : `Уровень ${lvl+1} (после аддона)`;
+  document.getElementById('t-blinds').textContent = `${blind.sb} / ${blind.bb}`;
+  const m = String(Math.floor(secs/60)).padStart(2,'0');
+  const s = String(secs%60).padStart(2,'0');
+  const el = document.getElementById('t-time');
+  el.textContent = `${m}:${s}`;
+  el.className = 'timer-time ' + (secs<=30?'urgent':secs<=90?'warn':'ok');
+  const next = BLINDS[Math.min(lvl+1, BLINDS.length-1)];
+  if (lvl === ADDON_AFTER-1 && !G.addonDone)
+    document.getElementById('t-next').textContent = 'После этого уровня — АДДОН';
+  else if (lvl+1 < BLINDS.length)
+    document.getElementById('t-next').textContent = `Следующий: ${next.sb} / ${next.bb}`;
+  else
+    document.getElementById('t-next').textContent = 'Финальный уровень';
+}
+function toggleTimer() {
+  const btn = document.getElementById('t-playbtn');
+  if (G.timer.running) {
+    clearInterval(G.timer.iv);
+    G.timer.running = false;
+    btn.textContent = '▶ Продолжить';
+    btn.className = 'btn btn-green';
+  } else {
+    G.timer.running = true;
+    btn.textContent = '⏸ Пауза';
+    btn.className = 'btn btn-ghost';
+    G.timer.iv = setInterval(() => {
+      G.timer.secs--;
+      if (G.timer.secs <= 0) {
+        G.timer.lvl++;
+        G.timer.secs = LEVEL_SECS;
+        beep();
+        if (navigator.vibrate) navigator.vibrate([300,100,300]);
+        if (G.timer.lvl === ADDON_AFTER && !G.addonDone) {
+          clearInterval(G.timer.iv);
+          G.timer.running = false;
+          btn.textContent = '▶ Продолжить';
+          btn.className = 'btn btn-green';
+          setTimeout(() => alert('🎰 Время аддона!'), 100);
+        }
+        if (G.timer.lvl >= BLINDS.length) {
+          clearInterval(G.timer.iv); G.timer.running = false;
+        }
+      }
+      updateTimerUI();
+    }, 1000);
+  }
+}
+function openBlindsModal() {
+  const tbl = document.getElementById('blinds-tbl');
+  tbl.innerHTML = '<tr><th>#</th><th>SB</th><th>BB</th></tr>' +
+    BLINDS.map((b,i) => {
+      let cls = i === G.timer.lvl ? 'row-cur' : i === ADDON_AFTER ? 'row-addon' : '';
+      return `<tr class="${cls}"><td>${i+1}${i===ADDON_AFTER?' 🎰':''}</td><td>${b.sb}</td><td>${b.bb}</td></tr>`;
+    }).join('');
+  openModal('m-blinds');
+}
+function beep() {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.3, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.6);
+    o.start(ctx.currentTime); o.stop(ctx.currentTime+0.6);
+  } catch(e) {}
+}
+
+// ── ADDON ────────────────────────────────────────────────
+function goAddon() {
+  if (G.timer.running) toggleTimer();
+  G._addonSel = {};
+  G.players.forEach((p,i) => { if (!p.eliminated) G._addonSel[i] = 0; });
+  nav('s-addon'); renderAddon();
+}
+function renderAddon() {
+  document.getElementById('addon-list').innerHTML = G.players
+    .filter(p=>!p.eliminated)
+    .map(p => {
+      const i = G.players.indexOf(p);
+      return `<div class="card" style="margin-bottom:10px">
+        <div class="player-name" style="margin-bottom:12px">${esc(p.name)}</div>
+        <div class="addon-btns">
+          <button class="btn btn-ghost" id="ao-${i}-600" onclick="selectAddon(${i},600)">Аддон<br>600 ₽</button>
+          <button class="btn btn-ghost" id="ao-${i}-300" onclick="selectAddon(${i},300)">Аддон<br>300 ₽</button>
+          <button class="btn btn-selected-gray" id="ao-${i}-0" onclick="selectAddon(${i},0)">Без<br>аддона</button>
+        </div>
+      </div>`;
+    }).join('');
+}
+function selectAddon(i, val) {
+  G._addonSel[i] = val;
+  [600, 300, 0].forEach(v => {
+    const btn = document.getElementById(`ao-${i}-${v}`);
+    if (!btn) return;
+    if (v === val) btn.className = `btn ${v === 0 ? 'btn-selected-gray' : 'btn-selected-green'}`;
+    else           btn.className = 'btn btn-ghost';
+  });
+}
+function finishAddon() {
+  G.players.forEach((p,i) => {
+    if (p.eliminated) return;
+    p.addon = G._addonSel[i] || 0;
+  });
+  G.addonDone = true;
+  if (G.timer.lvl < ADDON_AFTER) { G.timer.lvl = ADDON_AFTER; G.timer.secs = LEVEL_SECS; }
+  nav('s-tourn'); renderTourn(); updateTimerUI();
+}
+
+// ── PRIZES ───────────────────────────────────────────────
+function initPrizes() {
+  const total = bankTourn();
+  document.getElementById('prize-total-v').textContent = total + ' ₽';
+  document.getElementById('prize-fund').value = '0';
+  ['prize-p1','prize-p2','prize-p3'].forEach(id => document.getElementById(id).value = '');
+  ['win-1','win-2','win-3'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">— выбери —</option>';
+    G.players.forEach(p => sel.innerHTML += `<option value="${esc(p.name)}">${esc(p.name)}</option>`);
+  });
+  calcPrizes();
+}
+function calcPrizes() {
+  const total = bankTourn();
+  const fund = parseInt(document.getElementById('prize-fund').value)||0;
+  const pool = total - fund;
+  document.getElementById('prize-pool-v').textContent = pool + ' ₽';
+  const d = (parseInt(document.getElementById('prize-p1').value)||0)
+           +(parseInt(document.getElementById('prize-p2').value)||0)
+           +(parseInt(document.getElementById('prize-p3').value)||0);
+  const diff = pool - d;
+  const el = document.getElementById('prize-check');
+  if (d > 0) {
+    if (Math.abs(diff)<2) el.innerHTML='<span style="color:#3fb950">✅ Сумма сходится</span>';
+    else if (diff>0)      el.innerHTML=`<span style="color:#ffa657">⚠️ Нераспределено: ${diff} ₽</span>`;
+    else                  el.innerHTML=`<span style="color:#f85149">❌ Перебор: ${-diff} ₽</span>`;
+  } else { el.innerHTML=''; }
+}
+function calcTournamentResult() {
+  const slots = [
+    {sel:'win-1', val:parseInt(document.getElementById('prize-p1').value)||0},
+    {sel:'win-2', val:parseInt(document.getElementById('prize-p2').value)||0},
+    {sel:'win-3', val:parseInt(document.getElementById('prize-p3').value)||0},
+  ];
+  G.players.forEach(p=>p.prize=0);
+  slots.forEach(({sel,val}) => {
+    const name = document.getElementById(sel).value;
+    if (name) { const p=G.players.find(x=>x.name===name); if(p) p.prize+=val; }
+  });
+  const summaries = G.players.map(p => {
+    const p2 = paid(p)+p.rebuys*300+p.addon;
+    return {name:p.name, sub:`Заплатил ${p2} ₽  •  Приз ${p.prize} ₽`, net:p.prize-p2};
+  });
+  const bal = {};
+  G.players.forEach(p => { bal[p.name] = p.prize - (paid(p)+p.rebuys*300+p.addon); });
+  showSettle('🏆 Турнир — Расчёт', summaries, bal);
+}
+
+// ── SETTLEMENT ───────────────────────────────────────────
+function showSettle(title, summaries, balances, note = null) {
+  document.getElementById('settle-title').textContent = title;
+  document.getElementById('settle-note').innerHTML = note
+    ? `<div class="chip-warning">${note}</div>` : '';
+  summaries.sort((a,b)=>b.net-a.net);
+  document.getElementById('settle-summary').innerHTML = summaries.map(s => {
+    const cls = s.net>0?'net-pos':s.net<0?'net-neg':'net-zero';
+    return `<div class="player-row">
+      <div class="player-main">
+        <div class="player-name">${esc(s.name)}</div>
+        <div class="player-sub">${s.sub}</div>
+      </div>
+      <div class="${cls}">${s.net>0?'+':''}${s.net} ₽</div>
+    </div>`;
+  }).join('');
+  const transfers = simplifyDebts(balances);
+  const tf = document.getElementById('settle-transfers');
+  if (transfers.length === 0) {
+    tf.innerHTML = '<div style="text-align:center;color:#7d8590;padding:16px">Все в расчёте 🎉</div>';
+  } else {
+    tf.innerHTML = transfers.map(t => `
+      <div class="transfer-item">
+        <div class="transfer-names">
+          <span class="tf-from">${esc(t.from)}</span>
+          <span class="tf-arrow"> → </span>
+          <span class="tf-to">${esc(t.to)}</span>
+        </div>
+        <span class="tf-amt">${t.amount} ₽</span>
+      </div>`).join('');
+  }
+  nav('s-settle');
+}
+function simplifyDebts(bal) {
+  const cred=[], debt=[];
+  for (const [n,b] of Object.entries(bal)) {
+    if (b >  0.5) cred.push({n, a:b});
+    if (b < -0.5) debt.push({n, a:-b});
+  }
+  cred.sort((a,b)=>b.a-a.a); debt.sort((a,b)=>b.a-a.a);
+  const out=[];
+  let i=0, j=0;
+  while (i<cred.length && j<debt.length) {
+    const amt = Math.min(cred[i].a, debt[j].a);
+    out.push({from:debt[j].n, to:cred[i].n, amount:Math.round(amt)});
+    cred[i].a-=amt; debt[j].a-=amt;
+    if (cred[i].a<0.5) i++;
+    if (debt[j].a<0.5) j++;
+  }
+  return out;
+}
+
+// ── MODALS ───────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(el =>
+  el.addEventListener('click', e => { if(e.target===el) el.classList.remove('open'); }));
+
+// ── UTILS ────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
