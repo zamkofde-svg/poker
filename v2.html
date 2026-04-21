@@ -77,7 +77,9 @@ input[type=number] { -moz-appearance:textfield; }
 </style>
 </head>
 <body>
-<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel">
+function IOSDevice({children,width,height,dark}){return(<div style={{width:"100%",minHeight:"100vh",display:"flex",flexDirection:"column",background:"#050402",overflow:"auto"}}>{children}</div>);}
+</script>
 <script type="text/babel">
 
 // ── GAME CONSTANTS ──────────────────────────────────────
