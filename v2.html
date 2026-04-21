@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Anonymus AK&KK — Poker</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #050402;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  overflow: hidden;
+}
+#phone-wrap { transform-origin: center center; }
+
+/* Animations */
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeScale {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes suitFloat {
+  0%,100% { transform: translateY(0px) rotate(var(--r)); }
+  50%      { transform: translateY(-10px) rotate(var(--r)); }
+}
+@keyframes urgentPulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+.gold-text {
+  background: linear-gradient(90deg,#8a6510,#e8c86a,#c9a84c,#f0d878,#c9a84c,#8a6510);
+  background-size: 200% auto;
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 4s linear infinite;
+}
+.screen-anim { animation: fadeScale 0.3s ease; }
+
+/* Hide number input spinners */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+input[type=number] { -moz-appearance:textfield; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(201,168,76,0.2); border-radius: 2px; }
+
+/* Tweaks */
+#tweaks-panel {
+  position: fixed; bottom: 20px; right: 20px;
+  background: #1a1610; border: 1px solid rgba(201,168,76,0.35);
+  border-radius: 14px; padding: 14px 16px; z-index: 9999;
+  min-width: 180px; display: none;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+  font-size: 13px;
+}
+#tweaks-panel.visible { display: block; }
+#tweaks-panel h4 { color: #c9a84c; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; font-size: 11px; }
+#tweaks-panel label { color: #7a6a48; display: block; margin-bottom: 3px; font-size: 11px; }
+#tweaks-panel select { width: 100%; margin-bottom: 10px; background: #0a0906; color: #f0e2c0; border: 1px solid rgba(201,168,76,0.3); border-radius: 7px; padding: 6px 8px; font-size: 12px; }
+</style>
+</head>
+<body>
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel">
+
+// ── GAME CONSTANTS ──────────────────────────────────────
+const BLINDS = [
+  {sb:5,bb:10},{sb:5,bb:15},{sb:10,bb:20},{sb:10,bb:25},{sb:15,bb:30},
+  {sb:20,bb:40},{sb:25,bb:50},{sb:30,bb:60},{sb:40,bb:80},{sb:50,bb:100},
+  {sb:60,bb:120},{sb:75,bb:150},
+  // post-addon
+  {sb:100,bb:200},{sb:150,bb:300},{sb:200,bb:400},{sb:300,bb:600},
+  {sb:500,bb:1000},{sb:750,bb:1500},{sb:1000,bb:2000},{sb:1500,bb:3000},
+];
+const ADDON_AFTER = 12;
+const LEVEL_SECS  = 600;
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{"currency":"₽","theme":"gold"}/*EDITMODE-END*/;
+
+// ── DESIGN TOKENS ───────────────────────────────────────
+const C = {
+  bg:'#0a0906', surface:'#16130c', surface2:'#1e1a10',
+  gold:'#c9a84c', goldLight:'#e8c86a', goldDim:'#a07820',
+  cream:'#f0e2c0', muted:'#8a7a58', dimmer:'#5a4e38',
+  red:'#c23b22', green:'#2d8a4a', blue:'#2d6a8a',
+  border:'rgba(201,168,76,0.18)', borderBright:'rgba(201,168,76,0.45)',
+  felt:'#0d1a0d',
+};
+
+// ── UTILS ───────────────────────────────────────────────
+function simplifyDebts(bal) {
+  const cred=[], debt=[];
+  for (const [n,b] of Object.entries(bal)) {
+    if (b >  0.5) cred.push({n,a:b});
+    if (b < -0.5) debt.push({n,a:-b});
+  }
+  cred.sort((a,b)=>b.a-a.a); debt.sort((a,b)=>b.a-a.a);
+  const out=[]; let i=0,j=0;
+  while(i<cred.length && j<debt.length){
+    const amt=Math.min(cred[i].a,debt[j].a);
+    out.push({from:debt[j].n,to:cred[i].n,amount:Math.round(amt)});
+    cred[i].a-=amt; debt[j].a-=amt;
+    if(cred[i].a<0.5)i++; if(debt[j].a<0.5)j++;
+  }
+  return out;
+}
+function beep() {
+  try {
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(),g=ctx.createGain();
+    o.connect(g);g.connect(ctx.destination);
+    o.frequency.value=880;
+    g.gain.setValueAtTime(0.3,ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.6);
+    o.start(ctx.currentTime);o.stop(ctx.currentTime+0.6);
+  }catch(e){}
+}
+
+// ── SHARED COMPONENTS ───────────────────────────────────
+const GoldDivider = () => (
+  <div style={{display:'flex',alignItems:'center',gap:8,margin:'4px 0'}}>
+    <div style={{flex:1,height:1,background:`linear-gradient(90deg,transparent,${C.gold})`}}/>
+    <span style={{color:C.gold,fontSize:9}}>♦</span>
+    <div style={{flex:1,height:1,background:`linear-gradient(90deg,${C.gold},transparent)`}}/>
+  </div>
+);
+
+function Btn({label,onClick,ghost,danger,small,disabled,full,style={}}) {
+  const base = {
+    borderRadius:12, padding:small?'8px 14px':'13px 20px',
+    fontSize:small?13:15, fontWeight:700, border:'none', cursor:disabled?'not-allowed':'pointer',
+    opacity:disabled?0.4:1, transition:'filter 0.12s, transform 0.1s',
+    fontFamily:'Plus Jakarta Sans', width:full?'100%':undefined, ...style,
+  };
+  if(danger) return <button style={{...base,background:'transparent',border:'1px solid rgba(194,59,34,0.5)',color:C.red}} onClick={onClick} disabled={disabled}>{label}</button>;
+  if(ghost)  return <button style={{...base,background:'transparent',border:`1px solid ${C.borderBright}`,color:C.gold}} onClick={onClick} disabled={disabled}>{label}</button>;
+  return <button style={{...base,background:`linear-gradient(135deg,#c9a84c,#e8c86a 40%,#c9a84c 60%,#a07820)`,color:'#0a0906'}} onClick={onClick} disabled={disabled}>{label}</button>;
+}
+
+function Header({title,sub,onBack}) {
+  return (
+    <div style={{textAlign:'center',padding:'20px 20px 12px',position:'relative',flexShrink:0}}>
+      {onBack && <button onClick={onBack} style={{position:'absolute',left:12,top:20,background:'transparent',border:'none',cursor:'pointer',color:C.gold,fontSize:24,padding:4,lineHeight:1}}>‹</button>}
+      <div style={{fontFamily:'Cinzel',fontSize:20,fontWeight:700}} className="gold-text">{title}</div>
+      {sub && <div style={{color:C.muted,fontSize:12,marginTop:3}}>{sub}</div>}
+    </div>
+  );
+}
+
+function StatBar({items}) {
+  return (
+    <div style={{display:'flex',background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:'hidden',margin:'0 16px 12px',flexShrink:0}}>
+      {items.map((it,i)=>(
+        <React.Fragment key={i}>
+          {i>0 && <div style={{width:1,background:C.border}}/>}
+          <div style={{flex:1,textAlign:'center',padding:'10px 6px'}}>
+            <div style={{fontFamily:'Cinzel',fontSize:16,fontWeight:700,color:it.accent?C.gold:C.cream}}>{it.value}</div>
+            <div style={{color:C.muted,fontSize:10,marginTop:1,textTransform:'uppercase',letterSpacing:0.4}}>{it.label}</div>
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function PlayerRow({name,sub,actions,dim,badge}) {
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:10,background:dim?'rgba(0,0,0,0.2)':C.surface,border:`1px solid ${dim?'rgba(90,78,56,0.2)':C.border}`,borderRadius:12,padding:'11px 14px',marginBottom:8,opacity:dim?0.45:1,animation:'slideUp 0.25s ease'}}>
+      <div style={{width:36,height:36,borderRadius:9,background:C.surface2,border:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'center',color:C.gold,fontSize:13,fontWeight:700,flexShrink:0}}>{name[0].toUpperCase()}</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{color:C.cream,fontSize:14,fontWeight:600,display:'flex',alignItems:'center',gap:6}}>
+          {name}
+          {badge && <span style={{fontSize:10,color:badge.color,background:badge.bg,padding:'1px 6px',borderRadius:4,border:`1px solid ${badge.border}`}}>{badge.text}</span>}
+        </div>
+        {sub && <div style={{color:C.muted,fontSize:12,marginTop:1}}>{sub}</div>}
+      </div>
+      {actions && <div style={{display:'flex',gap:6,flexShrink:0}}>{actions}</div>}
+    </div>
+  );
+}
+
+function BottomSheet({title,sub,onClose,children}) {
+  return (
+    <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.82)',backdropFilter:'blur(4px)',display:'flex',alignItems:'flex-end',zIndex:100}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.surface2,border:`1px solid ${C.borderBright}`,borderRadius:'18px 18px 0 0',padding:'22px 18px 32px',width:'100%',animation:'slideUp 0.28s ease'}}>
+        <div style={{fontFamily:'Cinzel',color:C.gold,fontSize:17,marginBottom:sub?4:16}}>{title}</div>
+        {sub && <div style={{color:C.muted,fontSize:13,marginBottom:16}}>{sub}</div>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Input({value,onChange,placeholder,type='text',style={}}) {
+  return <input type={type} value={value} onChange={onChange} placeholder={placeholder} inputMode={type==='number'?'numeric':undefined}
+    style={{background:'rgba(255,255,255,0.04)',border:`1px solid ${C.borderBright}`,borderRadius:10,color:C.cream,fontFamily:'Plus Jakarta Sans',fontSize:15,padding:'11px 14px',width:'100%',outline:'none',...style}} />;
+}
+
+// ── FLOATING SUITS ──────────────────────────────────────
+function FloatingSuits() {
+  const suits=[{s:'♠',x:8,y:14,r:'-15deg',o:0.06,d:0},{s:'♥',x:80,y:10,r:'20deg',o:0.07,d:1.2,red:true},{s:'♦',x:86,y:72,r:'-8deg',o:0.06,d:0.8,red:true},{s:'♣',x:6,y:76,r:'22deg',o:0.05,d:1.8}];
+  return (
+    <div style={{position:'absolute',inset:0,pointerEvents:'none',overflow:'hidden'}}>
+      {suits.map((s,i)=>(
+        <div key={i} style={{position:'absolute',left:`${s.x}%`,top:`${s.y}%`,fontSize:38,color:s.red?C.red:C.cream,opacity:s.o,'--r':s.r,animation:`suitFloat ${3+i*0.6}s ease-in-out ${s.d}s infinite`}}>{s.s}</div>
+      ))}
+    </div>
+  );
+}
+
+function MiniCard({rank,suit}) {
+  const red=suit==='♥'||suit==='♦';
+  return (
+    <div style={{width:30,height:42,borderRadius:5,background:'#f5edd8',border:'1.5px solid rgba(0,0,0,0.12)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',boxShadow:'0 2px 8px rgba(0,0,0,0.5)',position:'relative'}}>
+      <div style={{position:'absolute',top:2,left:3,fontSize:8,fontWeight:700,color:red?C.red:'#1a1610',lineHeight:1}}>{rank}<br/>{suit}</div>
+      <div style={{fontSize:16,color:red?C.red:'#1a1610'}}>{suit}</div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// SCREEN: HOME
+// ════════════════════════════════════════════════════════
+function HomeScreen({onMode}) {
+  return (
+    <div className="screen-anim" style={{flex:1,height:0,background:`radial-gradient(ellipse at 50% 30%,#1a1a00,${C.bg} 65%)`,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'0 24px 20px',position:'relative',overflow:'hidden'}}>
+      <FloatingSuits/>
+      {/* Logo */}
+      <div style={{textAlign:'center',marginBottom:36,zIndex:1}}>
+        <div style={{display:'flex',justifyContent:'center',gap:5,marginBottom:14}}>
+          <MiniCard rank="A" suit="♠"/><MiniCard rank="K" suit="♠"/>
+          <div style={{width:6}}/>
+          <MiniCard rank="K" suit="♣"/><MiniCard rank="K" suit="♥"/>
+        </div>
+        <GoldDivider/>
+        <div style={{margin:'10px 0'}}>
+          <div style={{fontFamily:'Cinzel',fontSize:26,fontWeight:900,letterSpacing:3,lineHeight:1}} className="gold-text">ANONYMUS</div>
+          <div style={{fontFamily:'Cinzel',fontSize:12,color:C.muted,letterSpacing:6,marginTop:3}}>AK & KK</div>
+        </div>
+        <GoldDivider/>
+        <div style={{color:C.dimmer,fontSize:11,marginTop:7,letterSpacing:1,textTransform:'uppercase'}}>Расчёты без головной боли</div>
+      </div>
+
+      {/* Buttons */}
+      <div style={{width:'100%',maxWidth:320,display:'flex',flexDirection:'column',gap:10,zIndex:1}}>
+        {[
+          {mode:'cash',icon:'💰',title:'Кэш-игра',sub:'Закупы, рибаи и кэш-аут',accent:C.gold,bg:'#1e1a10',bdr:C.borderBright},
+          {mode:'tournament',icon:'🏆',title:'Турнир',sub:'Блайнды, аддон, призы',accent:C.green,bg:'#0d1a0f',bdr:'rgba(45,138,74,0.5)'},
+        ].map(({mode,icon,title,sub,accent,bg,bdr})=>(
+          <button key={mode} onClick={()=>onMode(mode)} style={{background:`linear-gradient(135deg,${bg},${bg}ee)`,border:`1px solid ${bdr}`,borderRadius:16,padding:'18px 20px',cursor:'pointer',textAlign:'left',boxShadow:'0 4px 20px rgba(0,0,0,0.4)',transition:'transform 0.12s'}}
+            onMouseDown={e=>e.currentTarget.style.transform='scale(0.97)'} onMouseUp={e=>e.currentTarget.style.transform='scale(1)'} onMouseLeave={e=>e.currentTarget.style.transform='scale(1)'}>
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <div style={{width:42,height:42,borderRadius:11,background:`${bg}`,border:`1px solid ${accent}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>{icon}</div>
+              <div><div style={{fontFamily:'Cinzel',color:C.cream,fontSize:15,fontWeight:600}}>{title}</div><div style={{color:C.muted,fontSize:12,marginTop:2}}>{sub}</div></div>
+              <div style={{marginLeft:'auto',color:accent,fontSize:20,opacity:0.8}}>›</div>
+            </div>
+          </button>
+        ))}
+      </div>
+      <div style={{display:'flex',gap:14,marginTop:28,opacity:0.18}}>
+        {['♠','♥','♦','♣'].map((s,i)=><span key={i} style={{fontSize:18,color:(i===1||i===2)?C.red:C.cream}}>{s}</span>)}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// SCREEN: SETUP
+// ════════════════════════════════════════════════════════
+function SetupScreen({mode,onStart,onBack}) {
+  const [players,setPlayers] = React.useState([]);
+  const [input,setInput]     = React.useState('');
+  const [buyin,setBuyin]     = React.useState('300');
+  const [ratio,setRatio]     = React.useState(2);
+  const isCash = mode==='cash';
+  const canStart = players.length>=2;
+
+  const addPlayer = () => {
+    const name=input.trim();
+    if(!name||players.find(p=>p.name===name)) return;
+    setPlayers(ps=>[...ps,{name}]);
+    setInput('');
+  };
+
+  return (
+    <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <Header title={isCash?'Кэш-игра':'Турнир'} sub="Добавьте игроков" onBack={onBack}/>
+
+      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+        {/* Buyin (cash only) */}
+        {isCash && (
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
+            <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:10,fontWeight:600}}>💰 Стартовый закуп</div>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
+              <Input type="number" value={buyin} onChange={e=>setBuyin(e.target.value)} placeholder="300" style={{flex:1}}/>
+              <span style={{color:C.muted,fontSize:14,flexShrink:0}}>₽</span>
+            </div>
+            <div style={{color:C.muted,fontSize:12,marginBottom:8}}>Курс фишек к рублям</div>
+            <div style={{display:'flex',gap:6}}>
+              {[1,2,5,10].map(v=>(
+                <button key={v} onClick={()=>setRatio(v)} style={{flex:1,padding:'8px 4px',borderRadius:9,fontSize:14,fontWeight:600,cursor:'pointer',border:`1.5px solid ${ratio===v?C.green:'rgba(255,255,255,0.08)'}`,background:ratio===v?'rgba(45,138,74,0.15)':'rgba(255,255,255,0.03)',color:ratio===v?C.green:C.muted,transition:'all 0.15s'}}>{v}:1</button>
+              ))}
+            </div>
+            <div style={{color:C.dimmer,fontSize:11,marginTop:7}}>
+              {ratio===1?'1 фишка = 1 ₽':`${ratio} фишки = 1 ₽`}
+            </div>
+          </div>
+        )}
+
+        {/* Add player */}
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
+          <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:10,fontWeight:600}}>♠ Добавить игрока</div>
+          <div style={{display:'flex',gap:8}}>
+            <Input value={input} onChange={e=>setInput(e.target.value)} placeholder="Имя игрока" style={{flex:1}}
+              onKeyDown={e=>e.key==='Enter'&&addPlayer()}/>
+            <Btn label="+" onClick={addPlayer} small style={{minWidth:42,borderRadius:9}}/>
+          </div>
+        </div>
+
+        {/* Player list */}
+        {players.length>0 && (
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,overflow:'hidden'}}>
+            {players.map((p,i)=>(
+              <div key={p.name} style={{display:'flex',alignItems:'center',padding:'11px 14px',borderBottom:i<players.length-1?`1px solid ${C.border}`:'none',animation:'slideUp 0.2s ease'}}>
+                <div style={{width:28,height:28,borderRadius:7,background:C.surface2,border:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'center',color:C.gold,fontSize:12,fontWeight:700,marginRight:10,flexShrink:0}}>{i+1}</div>
+                <span style={{color:C.cream,flex:1,fontSize:14}}>{p.name}</span>
+                <button onClick={()=>setPlayers(ps=>ps.filter((_,j)=>j!==i))} style={{background:'transparent',border:'none',cursor:'pointer',color:C.red,fontSize:18,padding:4}}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {players.length<2 && <div style={{textAlign:'center',color:C.dimmer,fontSize:12,marginTop:12}}>Минимум 2 игрока</div>}
+      </div>
+
+      {/* Bottom bar */}
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0,display:'flex',alignItems:'center',gap:10}}>
+        <div style={{textAlign:'center',minWidth:52}}>
+          <div style={{color:C.muted,fontSize:10}}>Игроков</div>
+          <div style={{color:C.cream,fontSize:16,fontWeight:700,fontFamily:'Cinzel'}}>{players.length}</div>
+        </div>
+        {isCash && <div style={{textAlign:'center',minWidth:64}}>
+          <div style={{color:C.muted,fontSize:10}}>Банк</div>
+          <div style={{color:C.gold,fontSize:16,fontWeight:700,fontFamily:'Cinzel'}}>{buyin&&players.length?`${parseInt(buyin)*players.length}₽`:'—'}</div>
+        </div>}
+        <Btn label="Начать →" full onClick={()=>onStart({players:players.map(p=>({...p,buyins:[parseInt(buyin)||300],rebuys:0,addon:0,chips:null,cashedOut:false,eliminated:false,prize:0})),buyin:parseInt(buyin)||300,ratio})} disabled={!canStart} style={{flex:1,borderRadius:11,fontSize:15,padding:'13px'}}/>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// SCREEN: CASH GAME
+// ════════════════════════════════════════════════════════
+function CashScreen({setup,onEnd,onBack}) {
+  const [players,setPlayers] = React.useState(setup.players);
+  const [sheet,setSheet]     = React.useState(null);
+  const [chipInput,setChipInput] = React.useState('');
+  const [buyinAmt,setBuyinAmt]   = React.useState(String(setup.buyin));
+
+  const paid = p => p.buyins.reduce((s,b)=>s+b,0);
+  const bank = players.reduce((s,p)=>s+paid(p),0);
+  const active = players.filter(p=>!p.cashedOut).length;
+  const buyinCount = players.reduce((s,p)=>s+p.buyins.length,0);
+
+  const updatePlayer = (name,fn) => setPlayers(ps=>ps.map(p=>p.name===name?fn(p):p));
+
+  const confirmBuyin = () => {
+    const amt=parseInt(buyinAmt)||0; if(!amt) return;
+    updatePlayer(sheet.player.name,p=>({...p,buyins:[...p.buyins,amt]}));
+    setSheet(null);
+  };
+  const confirmCashout = () => {
+    const chips=parseInt(chipInput); if(isNaN(chips)||chips<0) return;
+    updatePlayer(sheet.player.name,p=>({...p,chips,cashedOut:true}));
+    setSheet(null);
+  };
+
+  const rub = chips => Math.round(chips/setup.ratio);
+  const hintChips = parseInt(chipInput)||0;
+  const hintRub = rub(hintChips);
+  const hintNet = sheet ? hintRub - paid(sheet.player) : 0;
+
+  return (
+    <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
+      {/* Header */}
+      <div style={{background:`linear-gradient(180deg,#1a1200,${C.bg})`,flexShrink:0}}>
+        <Header title="Кэш-игра" onBack={onBack}/>
+        <StatBar items={[{label:'В банке',value:`${bank}₽`,accent:true},{label:'За столом',value:active},{label:'Закупов',value:buyinCount}]}/>
+      </div>
+      <div style={{height:2,background:`linear-gradient(90deg,transparent,${C.green},transparent)`,flexShrink:0}}/>
+
+      <div style={{flex:1,overflowY:'auto',padding:'12px 16px'}}>
+        {players.map(p=>{
+          const p2=paid(p);
+          const net=p.cashedOut?rub(p.chips||0)-p2:null;
+          return (
+            <PlayerRow key={p.name} name={p.name} dim={p.cashedOut}
+              sub={`${p2}₽ · ${p.buyins.length} закуп${p.buyins.length>1?'а':''}`}
+              badge={p.cashedOut?{text:net>=0?`+${net}₽`:`${net}₽`,color:net>0?C.green:net<0?C.red:C.muted,bg:net>0?'rgba(45,138,74,0.15)':net<0?'rgba(194,59,34,0.15)':'rgba(90,78,56,0.1)',border:net>0?'rgba(45,138,74,0.3)':net<0?'rgba(194,59,34,0.3)':'transparent'}:null}
+              actions={!p.cashedOut&&<>
+                <Btn label="Закуп" ghost small onClick={()=>{setBuyinAmt(String(setup.buyin));setSheet({type:'buyin',player:p});}}/>
+                <Btn label="Выйти" danger small onClick={()=>{setChipInput('');setSheet({type:'cashout',player:p});}}/>
+              </>}
+            />
+          );
+        })}
+      </div>
+
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
+        <Btn label="Финал → Расчёт" full onClick={()=>onEnd(players)}/>
+      </div>
+
+      {sheet?.type==='buyin' && (
+        <BottomSheet title="Закуп" sub={sheet.player.name} onClose={()=>setSheet(null)}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
+            <Input type="number" value={buyinAmt} onChange={e=>setBuyinAmt(e.target.value)} placeholder="300" style={{flex:1}}/>
+            <span style={{color:C.muted,fontSize:14}}>₽</span>
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
+            <Btn label={`+${buyinAmt}₽`} full onClick={confirmBuyin}/>
+          </div>
+        </BottomSheet>
+      )}
+      {sheet?.type==='cashout' && (
+        <BottomSheet title="Выход" sub={`${sheet.player.name} · фишки на руках`} onClose={()=>setSheet(null)}>
+          <Input type="number" value={chipInput} onChange={e=>setChipInput(e.target.value)} placeholder="Кол-во фишек"/>
+          {chipInput && (
+            <div style={{color:hintNet>=0?C.green:C.red,fontSize:13,marginBottom:12,marginTop:-4}}>
+              {hintChips} фишек = {hintRub}₽ → {hintNet>=0?'+':''}{hintNet}₽
+            </div>
+          )}
+          <div style={{display:'flex',gap:8}}>
+            <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
+            <Btn label="Подтвердить" full onClick={confirmCashout}/>
+          </div>
+        </BottomSheet>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// SCREEN: TOURNAMENT
+// ════════════════════════════════════════════════════════
+function TournamentScreen({setup,initialPlayers,onAddon,onEnd,onBack}) {
+  const [players,setPlayers] = React.useState(initialPlayers||setup.players);
+  const [lvl,setLvl]         = React.useState(0);
+  const [secs,setSecs]       = React.useState(LEVEL_SECS);
+  const [running,setRunning] = React.useState(false);
+  const [sheet,setSheet]     = React.useState(null);
+  const [showLevels,setShowLevels] = React.useState(false);
+  const addonDone = setup.addonDone||false;
+
+  React.useEffect(()=>{
+    if(!running) return;
+    const id=setInterval(()=>{
+      setSecs(s=>{
+        if(s<=1){
+          setLvl(l=>{
+            const nl=l+1;
+            beep();
+            if(navigator.vibrate) navigator.vibrate([300,100,300]);
+            if(nl===ADDON_AFTER&&!addonDone){
+              setRunning(false);
+              setTimeout(()=>alert('🎰 Время аддона!'),100);
+            }
+            return nl>=BLINDS.length?BLINDS.length-1:nl;
+          });
+          return LEVEL_SECS;
+        }
+        return s-1;
+      });
+    },1000);
+    return ()=>clearInterval(id);
+  },[running]);
+
+  const blind=BLINDS[Math.min(lvl,BLINDS.length-1)];
+  const nextBlind=BLINDS[Math.min(lvl+1,BLINDS.length-1)];
+  const mm=String(Math.floor(secs/60)).padStart(2,'0');
+  const ss2=String(secs%60).padStart(2,'0');
+  const pct=(secs/LEVEL_SECS)*100;
+  const timeColor=secs<=30?C.red:secs<=90?'#ffa657':C.green;
+  const isPreAddon=lvl<ADDON_AFTER;
+  const active=players.filter(p=>!p.eliminated).length;
+  const bank=players.reduce((s,p)=>s+p.buyins[0]+p.rebuys*300+p.addon,0);
+
+  const eliminate = name => { setPlayers(ps=>ps.map(p=>p.name===name?{...p,eliminated:true}:p)); setSheet(null); };
+  const rebuy = name => { setPlayers(ps=>ps.map(p=>p.name===name?{...p,rebuys:p.rebuys+1,eliminated:false}:p)); setSheet(null); };
+
+  return (
+    <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
+      <div style={{background:`linear-gradient(180deg,#050d05,${C.bg})`,flexShrink:0}}>
+        <Header title="Турнир" onBack={onBack}/>
+
+        {/* Timer */}
+        <div style={{margin:'0 16px 10px',background:`radial-gradient(ellipse at center,#121d12,#090e09)`,border:`1px solid rgba(45,138,74,0.35)`,borderRadius:16,padding:'16px',textAlign:'center'}}>
+          <div style={{color:C.muted,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:2}}>
+            {isPreAddon?`Уровень ${lvl+1} / ${ADDON_AFTER}`:`Уровень ${lvl+1} (после аддона)`}
+          </div>
+          <div style={{fontFamily:'Cinzel',fontSize:16,color:'#ffa657',fontWeight:700,marginBottom:8}}>{blind.sb} / {blind.bb}</div>
+          <div style={{fontFamily:'Cinzel',fontSize:48,fontWeight:700,color:timeColor,letterSpacing:2,lineHeight:1,animation:secs<=30?'urgentPulse 0.5s ease infinite':undefined}}>{mm}:{ss2}</div>
+          <div style={{margin:'8px auto',width:'75%',height:3,background:'rgba(255,255,255,0.07)',borderRadius:2,overflow:'hidden'}}>
+            <div style={{height:'100%',width:`${pct}%`,background:`linear-gradient(90deg,${C.green},#4dc46a)`,borderRadius:2,transition:'width 1s linear'}}/>
+          </div>
+          <div style={{color:C.dimmer,fontSize:12}}>
+            {lvl===ADDON_AFTER-1&&!addonDone?'После этого уровня — АДДОН':`Следующий: ${nextBlind.sb} / ${nextBlind.bb}`}
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div style={{display:'flex',gap:8,margin:'0 16px 10px'}}>
+          <Btn label={running?'⏸ Пауза':'▶ Старт'} full onClick={()=>setRunning(r=>!r)} style={{flex:2,borderRadius:11,padding:'11px'}}/>
+          <Btn label="📋" ghost onClick={()=>setShowLevels(true)} style={{width:48,borderRadius:11,padding:'11px 0',fontSize:18}}/>
+          <Btn label="⏭" ghost onClick={()=>{setLvl(l=>Math.min(l+1,BLINDS.length-1));setSecs(LEVEL_SECS);}} style={{width:48,borderRadius:11,padding:'11px 0',fontSize:18}}/>
+        </div>
+
+        <StatBar items={[{label:'Банк',value:`${bank}₽`,accent:true},{label:'Активных',value:active},{label:'Вылетело',value:players.length-active}]}/>
+      </div>
+      <div style={{height:2,background:`linear-gradient(90deg,transparent,${C.green},transparent)`,flexShrink:0}}/>
+
+      <div style={{flex:1,overflowY:'auto',padding:'12px 16px'}}>
+        {players.map(p=>(
+          <PlayerRow key={p.name} name={p.name} dim={p.eliminated}
+            sub={`${p.buyins[0]+p.rebuys*300+p.addon}₽${p.rebuys>0?` · ${p.rebuys}× рибай`:''}${p.addon>0?` · аддон ${p.addon}₽`:''}`}
+            badge={p.eliminated?{text:'ВЫЛЕТЕЛ',color:C.red,bg:'rgba(194,59,34,0.15)',border:'rgba(194,59,34,0.3)'}:null}
+            actions={p.eliminated
+              ?<Btn label="Рибай" ghost small onClick={()=>setSheet({type:'rebuy',player:p})}/>
+              :<Btn label="Вылет" danger small onClick={()=>setSheet({type:'elim',player:p})}/>
+            }
+          />
+        ))}
+      </div>
+
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0,display:'flex',gap:8}}>
+        {!addonDone && <Btn label="🎰 Аддон" ghost full onClick={()=>onAddon(players)} style={{flex:1,borderRadius:11,padding:'11px'}}/>}
+        {addonDone  && <Btn label="🏁 Призы →" full onClick={()=>onEnd(players,bank)} style={{flex:2,borderRadius:11,padding:'11px'}}/>}
+        {!addonDone && <Btn label="🏁 Конец" danger onClick={()=>onEnd(players,bank)} small style={{borderRadius:11,padding:'11px 12px'}}/>}
+      </div>
+
+      {/* Blind levels modal */}
+      {showLevels && (
+        <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.88)',display:'flex',alignItems:'flex-end',zIndex:100}} onClick={()=>setShowLevels(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.surface2,border:`1px solid ${C.borderBright}`,borderRadius:'18px 18px 0 0',padding:'20px 18px 36px',width:'100%',maxHeight:'65%',overflow:'auto',animation:'slideUp 0.25s ease'}}>
+            <div style={{fontFamily:'Cinzel',color:C.gold,fontSize:17,marginBottom:14}}>Структура блайндов</div>
+            {BLINDS.map((b,i)=>(
+              <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 0',borderBottom:`1px solid ${C.border}`,background:i===lvl?'rgba(201,168,76,0.05)':'transparent'}}>
+                <span style={{color:i===lvl?C.gold:C.muted,fontSize:12}}>
+                  {i===ADDON_AFTER?'🎰 ':''}{i<ADDON_AFTER?`Ур. ${i+1}`:`Ур. ${i+1} (пост-аддон)`}
+                </span>
+                <span style={{color:i===lvl?C.cream:C.muted,fontSize:14,fontWeight:600,fontFamily:'Cinzel'}}>{b.sb} / {b.bb}</span>
+                {i===lvl&&<span style={{color:C.green,fontSize:10}}>← сейчас</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {sheet?.type==='elim' && (
+        <BottomSheet title="Вылет" sub={sheet.player.name} onClose={()=>setSheet(null)}>
+          <div style={{display:'flex',gap:8}}>
+            <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
+            <Btn label="Подтвердить" full onClick={()=>eliminate(sheet.player.name)}/>
+          </div>
+        </BottomSheet>
+      )}
+      {sheet?.type==='rebuy' && (
+        <BottomSheet title="Рибай" sub={`${sheet.player.name} · +300₽ = 3000 фишек`} onClose={()=>setSheet(null)}>
+          <div style={{display:'flex',gap:8}}>
+            <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
+            <Btn label="Рибай +300₽" full onClick={()=>rebuy(sheet.player.name)}/>
+          </div>
+        </BottomSheet>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// SCREEN: ADDON
+// ════════════════════════════════════════════════════════
+function AddonScreen({players,onDone,onBack}) {
+  const active = players.filter(p=>!p.eliminated);
+  const [sel,setSel] = React.useState(Object.fromEntries(active.map(p=>[p.name,0])));
+
+  return (
+    <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <Header title="Аддон" sub="Выберите аддон для каждого игрока" onBack={onBack}/>
+      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+        {active.map(p=>(
+          <div key={p.name} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:10}}>
+            <div style={{color:C.cream,fontSize:14,fontWeight:600,marginBottom:12}}>{p.name}</div>
+            <div style={{display:'flex',gap:8}}>
+              {[{val:600,label:'600₽'},{val:300,label:'300₽'},{val:0,label:'Без'}].map(({val,label})=>(
+                <button key={val} onClick={()=>setSel(s=>({...s,[p.name]:val}))} style={{flex:1,padding:'10px 6px',borderRadius:9,fontSize:14,fontWeight:600,cursor:'pointer',border:`1.5px solid ${sel[p.name]===val?(val===0?'rgba(90,78,56,0.6)':C.green):'rgba(255,255,255,0.06)'}`,background:sel[p.name]===val?(val===0?'rgba(90,78,56,0.1)':'rgba(45,138,74,0.15)'):'rgba(255,255,255,0.02)',color:sel[p.name]===val?(val===0?C.muted:C.green):C.muted,transition:'all 0.15s'}}>{label}</button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
+        <Btn label="Готово → Продолжить игру" full onClick={()=>onDone(sel)}/>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// SCREEN: PRIZES
+// ════════════════════════════════════════════════════════
+function PrizesScreen({players,bank,onSettle,onBack}) {
+  const [prizes,setPrizes] = React.useState(['','','']);
+  const [winners,setWinners] = React.useState(['','','']);
+  const MEDALS=['🥇','🥈','🥉'];
+
+  const pool = bank;
+  const total = prizes.reduce((s,v)=>s+(parseInt(v)||0),0);
+  const diff = pool-total;
+  const canCalc = winners[0] && (parseInt(prizes[0])||0)>0;
+
+  return (
+    <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <Header title="Призы" sub="Распределение выплат" onBack={onBack}/>
+      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+        <StatBar items={[{label:'Собрано',value:`${bank}₽`,accent:true}]}/>
+
+        {/* Prize amounts */}
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
+          <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:12,fontWeight:600}}>🏆 Суммы призов</div>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+              <span style={{fontSize:18,width:26}}>{MEDALS[i]}</span>
+              <Input type="number" value={prizes[i]} onChange={e=>setPrizes(p=>p.map((v,j)=>j===i?e.target.value:v))} placeholder="0" style={{flex:1}}/>
+              <span style={{color:C.muted,fontSize:14,flexShrink:0}}>₽</span>
+            </div>
+          ))}
+          {total>0 && (
+            <div style={{fontSize:13,marginTop:4,color:Math.abs(diff)<2?C.green:diff>0?'#ffa657':C.red}}>
+              {Math.abs(diff)<2?'✅ Сумма сходится':diff>0?`⚠️ Нераспределено: ${diff}₽`:`❌ Перебор: ${-diff}₽`}
+            </div>
+          )}
+        </div>
+
+        {/* Winners */}
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
+          <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:12,fontWeight:600}}>🎖 Победители</div>
+          {[0,1,2].map(i=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+              <span style={{fontSize:18,width:26}}>{MEDALS[i]}</span>
+              <select value={winners[i]} onChange={e=>setWinners(w=>w.map((v,j)=>j===i?e.target.value:v))} style={{flex:1,background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,color:winners[i]?C.cream:C.muted,padding:'11px 12px',fontSize:14,fontFamily:'Plus Jakarta Sans'}}>
+                <option value="">— выбери —</option>
+                {players.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
+        <Btn label="Рассчитать →" full onClick={()=>onSettle({winners,prizes:prizes.map(v=>parseInt(v)||0),fund:0,pool,players})} disabled={!canCalc}/>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// SCREEN: CASH FINAL (enter chips for remaining players)
+// ════════════════════════════════════════════════════════
+function CashFinalScreen({players,ratio,onDone,onBack}) {
+  const remaining = players.filter(p=>!p.cashedOut);
+  const [chips,setChips] = React.useState(Object.fromEntries(remaining.map(p=>[p.name,''])));
+
+  const paid = p => p.buyins.reduce((s,b)=>s+b,0);
+  const rub  = v => Math.round((parseInt(v)||0)/ratio);
+  const canDone = remaining.every(p=>(chips[p.name]??'')!=='');
+
+  const handleDone = () => {
+    const updated = players.map(p=>{
+      if(p.cashedOut) return p;
+      return {...p,chips:parseInt(chips[p.name])||0,cashedOut:true};
+    });
+    const bank   = updated.reduce((s,p)=>s+paid(p),0);
+    const chipsIn  = updated.reduce((s,p)=>s+paid(p)*ratio,0);
+    const chipsOut = updated.reduce((s,p)=>s+(p.chips||0),0);
+    const bal={};
+    updated.forEach(p=>{ bal[p.name]=rub(p.chips||0)-paid(p); });
+    onDone({players:updated,bank,bal,chipDiff:chipsIn-chipsOut,ratio});
+  };
+
+  return (
+    <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <Header title="Финал" sub="Введите фишки оставшихся игроков" onBack={onBack}/>
+      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+        {remaining.map(p=>{
+          const v=chips[p.name]??'';
+          const net=v!==''?rub(v)-paid(p):null;
+          return (
+            <div key={p.name} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:10}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                <div style={{color:C.cream,fontSize:14,fontWeight:600}}>{p.name}</div>
+                <div style={{color:C.muted,fontSize:12}}>Закупы: {paid(p)}₽</div>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <Input type="number" value={v} onChange={e=>setChips(c=>({...c,[p.name]:e.target.value}))} placeholder="Фишки на руках" style={{flex:1}}/>
+              </div>
+              {net!==null && (
+                <div style={{color:net>=0?C.green:C.red,fontSize:13,marginTop:6}}>
+                  {parseInt(v)||0} фишек = {rub(v)}₽ → {net>=0?'+':''}{net}₽
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {/* Already cashed out */}
+        {players.filter(p=>p.cashedOut).map(p=>{
+          const net=Math.round((p.chips||0)/ratio)-paid(p);
+          return (
+            <div key={p.name} style={{background:'rgba(0,0,0,0.2)',border:`1px solid rgba(90,78,56,0.2)`,borderRadius:13,padding:'12px 14px',marginBottom:10,opacity:0.5,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div style={{color:C.cream,fontSize:14}}>✓ {p.name}</div>
+              <div style={{color:net>=0?C.green:C.red,fontSize:13,fontWeight:600}}>{net>=0?'+':''}{net}₽</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
+        <Btn label="Рассчитать →" full onClick={handleDone} disabled={!canDone}/>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// SCREEN: SETTLEMENT
+// ════════════════════════════════════════════════════════
+function SettleScreen({title,summaries,transfers,fundTransfers,note,onNewGame}) {
+  const renderTransfer = (t,i,arr,isLast) => (
+    <div key={i} style={{display:'flex',alignItems:'center',padding:'12px 14px',borderBottom:i<arr.length-1?`1px solid ${C.border}`:'none',gap:8}}>
+      <span style={{color:C.red,fontWeight:600,fontSize:14}}>{t.from}</span>
+      <span style={{color:C.dimmer,fontSize:12}}>→</span>
+      <span style={{color:C.green,fontWeight:600,fontSize:14,flex:1}}>{t.to}</span>
+      {t.label && <span style={{color:C.muted,fontSize:11,background:'rgba(90,78,56,0.2)',padding:'2px 7px',borderRadius:5}}>{t.label}</span>}
+      <span style={{fontFamily:'Cinzel',color:C.gold,fontWeight:700,fontSize:16}}>{t.amount}₽</span>
+    </div>
+  );
+  return (
+    <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <Header title={title}/>
+      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+        {note && <div style={{background:'rgba(42,21,0,0.8)',border:'1px solid #9e5a00',borderRadius:10,padding:'12px',marginBottom:12,fontSize:13,color:'#ffa657'}}>{note}</div>}
+
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,overflow:'hidden',marginBottom:12}}>
+          {summaries.map((s,i)=>(
+            <div key={s.name} style={{display:'flex',alignItems:'center',padding:'12px 14px',borderBottom:i<summaries.length-1?`1px solid ${C.border}`:'none'}}>
+              <div style={{width:34,height:34,borderRadius:8,background:C.surface2,border:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'center',color:C.gold,fontSize:12,fontWeight:700,marginRight:10,flexShrink:0}}>{s.name[0]}</div>
+              <div style={{flex:1}}>
+                <div style={{color:C.cream,fontSize:14,fontWeight:600}}>{s.name}</div>
+                <div style={{color:C.muted,fontSize:12,marginTop:1}}>{s.sub}</div>
+              </div>
+              <div style={{fontFamily:'Cinzel',fontSize:16,fontWeight:700,color:s.net>0?C.green:s.net<0?C.red:C.muted}}>
+                {s.net>0?'+':''}{s.net}₽
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:8,fontWeight:600,marginTop:4}}>💸 Кто кому переводит</div>
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,overflow:'hidden',marginBottom:12}}>
+          {transfers.length===0
+            ?<div style={{textAlign:'center',color:C.muted,padding:'16px',fontSize:13}}>Все в расчёте 🎉</div>
+            :transfers.map((t,i)=>renderTransfer(t,i,transfers))
+          }
+        </div>
+        {fundTransfers?.length>0 && <>
+          <div style={{color:C.muted,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:8,fontWeight:600}}>💼 Сбор в фонд</div>
+          <div style={{background:C.surface,border:`1px solid rgba(90,78,56,0.4)`,borderRadius:13,overflow:'hidden',marginBottom:12}}>
+            {fundTransfers.map((t,i)=>renderTransfer(t,i,fundTransfers))}
+          </div>
+        </>}      </div>
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
+        <Btn label="← Новая игра" ghost full onClick={onNewGame}/>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════
+// ROOT APP
+// ════════════════════════════════════════════════════════
+function App() {
+  const [screen,setScreen] = React.useState('home');
+  const [mode,setMode]     = React.useState(null);
+  const [setup,setSetup]   = React.useState(null);
+  const [game,setGame]     = React.useState(null);
+  const [settle,setSettle] = React.useState(null);
+  const [tweaksVisible,setTweaksVisible] = React.useState(false);
+
+  React.useEffect(()=>{ localStorage.setItem('pk_screen',screen); },[screen]);
+
+  React.useEffect(()=>{
+    window.addEventListener('message',e=>{
+      if(e.data?.type==='__activate_edit_mode')   setTweaksVisible(true);
+      if(e.data?.type==='__deactivate_edit_mode') setTweaksVisible(false);
+    });
+    window.parent.postMessage({type:'__edit_mode_available'},'*');
+  },[]);
+
+  const go = s => setScreen(s);
+
+  const handleSetup = (s,m) => {
+    setGame(null); // сбрасываем предыдущую игру
+    setSetup({...s,addonDone:false});
+    setMode(m);
+    go(m==='cash'?'cash':'tourn');
+  };
+
+  const handleAddon = (players) => {
+    setGame(g=>({...g,players}));
+    go('addon');
+  };
+
+  const handleAddonDone = (sel) => {
+    setSetup(s=>({...s,addonDone:true}));
+    setGame(g=>({...g,players:g.players.map(p=>({...p,addon:sel[p.name]??0}))}));
+    go('tourn');
+  };
+
+  const handleCashFinal = (players) => {
+    setGame(g=>({...(g||{}),players}));
+    go('cashFinal');
+  };
+
+  const handleCashEnd = ({players,bank,bal,chipDiff,ratio}) => {
+    const summaries = [...players].sort((a,b)=>{
+      const an=Math.round((a.chips||0)/ratio)-a.buyins.reduce((s,b)=>s+b,0);
+      const bn=Math.round((b.chips||0)/ratio)-b.buyins.reduce((s,b)=>s+b,0);
+      return bn-an;
+    }).map(p=>{
+      const p2=p.buyins.reduce((s,b)=>s+b,0);
+      const rub=Math.round((p.chips||0)/ratio);
+      return {name:p.name,sub:`Закупы ${p2}₽  •  Кэш-аут ${rub}₽`,net:rub-p2};
+    });
+    const transfers = simplifyDebts(bal);
+    const note = chipDiff!==0?`⚠️ Расхождение ${Math.abs(chipDiff)} фишек — возможно кто-то пересчитал неверно`:null;
+    setSettle({title:'Кэш — Расчёт',summaries,transfers,note});
+    go('settle');
+  };
+
+  const handleTournEnd = (players,bank) => {
+    setGame(g=>({...(g||{}),players,bank}));
+    go('prizes');
+  };
+
+  const handlePrizeSettle = ({winners,prizes,fund,pool,players}) => {
+    const bal={};
+    players.forEach(p=>{ bal[p.name]=-(p.buyins[0]+p.rebuys*300+p.addon); });
+    [0,1,2].forEach(i=>{ if(winners[i]&&prizes[i]) bal[winners[i]]=(bal[winners[i]]||0)+prizes[i]; });
+    const summaries=[...players].map(p=>{
+      const paid=p.buyins[0]+p.rebuys*300+p.addon;
+      const w=[0,1,2].reduce((s,i)=>s+(winners[i]===p.name?prizes[i]:0),0);
+      return {name:p.name,sub:`Заплатил ${paid}₽${w?`  •  Приз ${w}₽`:''}`,net:bal[p.name]};
+    }).sort((a,b)=>b.net-a.net);
+    const transfers=simplifyDebts(bal);
+    setSettle({title:'Турнир — Расчёт',summaries,transfers,fundTransfers:[],note:null});
+    go('settle');
+  };
+
+  const renderScreen = () => {
+    switch(screen) {
+      case 'home':   return <HomeScreen onMode={m=>{setMode(m);go('setup');}}/>;
+      case 'setup':  return <SetupScreen mode={mode} onBack={()=>go('home')} onStart={s=>handleSetup(s,mode)}/>;
+      case 'cash':     return <CashScreen setup={setup} onBack={()=>go('setup')} onEnd={players=>{ setGame(g=>({...(g||{}),players})); go('cashFinal'); }}/>;
+      case 'cashFinal': return <CashFinalScreen players={game?.players||[]} ratio={setup?.ratio||2} onBack={()=>go('cash')} onDone={handleCashEnd}/>;
+      case 'tourn':  return <TournamentScreen setup={setup} initialPlayers={game?.players||null} onBack={()=>go('setup')}
+                       onAddon={players=>{setGame(g=>({...(g||{}),players}));go('addon');}}
+                       onEnd={handleTournEnd}/>;
+      case 'addon':  return <AddonScreen players={game?.players||[]} onBack={()=>go('tourn')} onDone={handleAddonDone}/>;
+      case 'prizes': return <PrizesScreen players={game?.players||[]} bank={game?.bank||0} onBack={()=>go('tourn')} onSettle={handlePrizeSettle}/>;
+      case 'settle': return settle?<SettleScreen {...settle} onNewGame={()=>{setSettle(null);setGame(null);setSetup(null);go('home');}}/>:null;
+      default:       return <HomeScreen onMode={m=>{setMode(m);go('setup');}}/>;
+    }
+  };
+
+  return (
+    <div>
+      <div id="phone-wrap" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#040302'}}>
+        <IOSDevice width={390} height={844} dark>
+          <div style={{height:'100%',paddingTop:62,paddingBottom:40,display:'flex',flexDirection:'column',background:C.bg}}>
+            {renderScreen()}
+          </div>
+        </IOSDevice>
+      </div>
+      <div id="tweaks-panel" className={tweaksVisible?'visible':''}>
+        <h4>Tweaks</h4>
+        <label>Тема</label>
+        <select><option>Золото (казино)</option><option>Серебро</option></select>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+
+function scalePhone() {
+  const wrap=document.getElementById('phone-wrap');
+  if(!wrap) return;
+  const s=Math.min((window.innerHeight-20)/844,(window.innerWidth-20)/390,1);
+  wrap.style.transform=`scale(${s})`;
+  wrap.style.marginTop=`${-(844*(1-s)/2)}px`;
+  wrap.style.marginBottom=`${-(844*(1-s)/2)}px`;
+}
+window.addEventListener('resize',scalePhone);
+setTimeout(scalePhone,100);
+</script>
+<div id="root"></div>
+<template id="__bundler_thumbnail">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80">
+    <rect width="120" height="80" fill="#0a0906"/>
+    <text x="60" y="48" text-anchor="middle" font-size="36" fill="#c9a84c">♠</text>
+  </svg>
+</template>
+</body>
+</html>
