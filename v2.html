@@ -12,12 +12,17 @@
 *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   background: #050402;
-  display: flex; align-items: center; justify-content: center;
   min-height: 100vh;
   font-family: 'Plus Jakarta Sans', sans-serif;
-  overflow: hidden;
+  overflow-x: hidden;
 }
-#phone-wrap { transform-origin: center center; }
+#phone-wrap {
+  width: 100% !important;
+  min-height: 100vh !important;
+  transform: none !important;
+  margin: 0 !important;
+  display: block !important;
+}
 
 /* Animations */
 @keyframes shimmer {
@@ -78,7 +83,7 @@ input[type=number] { -moz-appearance:textfield; }
 </head>
 <body>
 <script type="text/babel">
-function IOSDevice({children,width,height,dark}){return(<div style={{width:"100%",minHeight:"100vh",display:"flex",flexDirection:"column",background:"#050402",overflow:"auto"}}>{children}</div>);}
+function IOSDevice({children}){return(<div style={{width:"100%",minHeight:"100vh",display:"flex",flexDirection:"column",background:"#050402",overflowX:"hidden",overflowY:"auto"}}>{children}</div>);}
 </script>
 <script type="text/babel">
 
@@ -902,7 +907,7 @@ function App() {
     <div>
       <div id="phone-wrap" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#040302'}}>
         <IOSDevice width={390} height={844} dark>
-          <div style={{height:'100%',paddingTop:62,paddingBottom:40,display:'flex',flexDirection:'column',background:C.bg}}>
+          <div style={{minHeight:'100vh',paddingTop:'env(safe-area-inset-top, 16px)',paddingBottom:'env(safe-area-inset-bottom, 24px)',display:'flex',flexDirection:'column',background:C.bg}}>
             {renderScreen()}
           </div>
         </IOSDevice>
@@ -919,16 +924,7 @@ function App() {
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App/>);
 
-function scalePhone() {
-  const wrap=document.getElementById('phone-wrap');
-  if(!wrap) return;
-  const s=Math.min((window.innerHeight-20)/844,(window.innerWidth-20)/390,1);
-  wrap.style.transform=`scale(${s})`;
-  wrap.style.marginTop=`${-(844*(1-s)/2)}px`;
-  wrap.style.marginBottom=`${-(844*(1-s)/2)}px`;
-}
-window.addEventListener('resize',scalePhone);
-setTimeout(scalePhone,100);
+function scalePhone() { /* disabled: renders fullscreen on real device */ }
 </script>
 <div id="root"></div>
 <template id="__bundler_thumbnail">
