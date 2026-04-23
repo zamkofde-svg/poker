@@ -713,6 +713,7 @@ function PrizesScreen({players,bank,onSettle,onBack}) {
   const [prizes,setPrizes]   = React.useState(['','','']);
   const [winners,setWinners] = React.useState(['','','']);
   const [fundAmt,setFundAmt] = React.useState('');
+  const [fundHolder,setFundHolder] = React.useState('');
   const MEDALS=['🥇','🥈','🥉'];
 
   const fund  = parseInt(fundAmt)||0;
@@ -731,11 +732,19 @@ function PrizesScreen({players,bank,onSettle,onBack}) {
         {/* Банк развития */}
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
           <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:10,fontWeight:600}}>💼 Банк развития</div>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
             <Input type="number" value={fundAmt} onChange={e=>setFundAmt(e.target.value)} placeholder="0" style={{flex:1}}/>
             <span style={{color:C.muted,fontSize:14,flexShrink:0}}>₽</span>
           </div>
-          {fund>0 && <div style={{color:C.dimmer,fontSize:12,marginTop:4}}>По {perPerson}₽ с каждого игрока</div>}
+          {fund>0 && <>
+            <div style={{color:C.dimmer,fontSize:12,marginBottom:8}}>По {perPerson}₽ с каждого · вшивается в расчёт автоматически</div>
+            <div style={{color:C.muted,fontSize:11,marginBottom:6}}>Держатель фонда</div>
+            <select value={fundHolder} onChange={e=>setFundHolder(e.target.value)}
+              style={{width:'100%',background:C.surface2,border:`1px solid ${C.borderBright}`,borderRadius:9,color:fundHolder?C.cream:C.muted,padding:'11px 12px',fontSize:14,fontFamily:'Plus Jakarta Sans'}}>
+              <option value="">— выбери —</option>
+              {players.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}
+            </select>
+          </>}
         </div>
 
         {/* Prize amounts */}
@@ -771,7 +780,7 @@ function PrizesScreen({players,bank,onSettle,onBack}) {
       </div>
 
       <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
-        <Btn label="Рассчитать →" full onClick={()=>onSettle({winners,prizes:prizes.map(v=>parseInt(v)||0),fund,pool,players})} disabled={!canCalc}/>
+        <Btn label="Рассчитать →" full onClick={()=>onSettle({winners,prizes:prizes.map(v=>parseInt(v)||0),fund,fundHolder,pool,players})} disabled={!canCalc}/>
       </div>
     </div>
   );
@@ -964,23 +973,24 @@ function App() {
     go('prizes');
   };
 
-  const handlePrizeSettle = ({winners,prizes,fund,pool,players}) => {
+  const handlePrizeSettle = ({winners,prizes,fund,fundHolder,pool,players}) => {
     const bal={};
     players.forEach(p=>{ bal[p.name]=-(p.buyins[0]+p.rebuys*300+p.addon); });
     [0,1,2].forEach(i=>{ if(winners[i]&&prizes[i]) bal[winners[i]]=(bal[winners[i]]||0)+prizes[i]; });
+    // Bake fund into main balances: each player pays equal share, holder receives total
+    if(fund>0 && fundHolder){
+      const perP=Math.round(fund/players.length);
+      players.forEach(p=>{ bal[p.name]=(bal[p.name]||0)-perP; });
+      bal[fundHolder]=(bal[fundHolder]||0)+fund;
+    }
     const summaries=[...players].map(p=>{
       const paid=p.buyins[0]+p.rebuys*300+p.addon;
       const w=[0,1,2].reduce((s,i)=>s+(winners[i]===p.name?prizes[i]:0),0);
-      return {name:p.name,sub:`Заплатил ${paid}₽${w?`  •  Приз ${w}₽`:''}`,net:bal[p.name]};
+      const fundPart=fund>0&&fundHolder?(p.name===fundHolder?`  •  Фонд +${fund}₽`:`  •  Фонд -${Math.round(fund/players.length)}₽`):'';
+      return {name:p.name,sub:`Заплатил ${paid}₽${w?`  •  Приз ${w}₽`:''}${fundPart}`,net:bal[p.name]};
     }).sort((a,b)=>b.net-a.net);
     const transfers=simplifyDebts(bal);
-    // Fund transfers: each player owes equal share, winner[0] collects
-    let fundTransfers=[];
-    if(fund>0&&winners[0]&&players.length>0){
-      const perP=Math.round(fund/players.length);
-      fundTransfers=players.filter(p=>p.name!==winners[0]).map(p=>({from:p.name,to:winners[0],amount:perP,label:'в фонд'}));
-    }
-    setSettle({title:'Турнир — Расчёт',summaries,transfers,fundTransfers,note:null});
+    setSettle({title:'Турнир — Расчёт',summaries,transfers,fundTransfers:[],note:null});
     go('settle');
   };
 
