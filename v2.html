@@ -295,6 +295,8 @@ function SetupScreen({mode,onStart,onBack}) {
   const [input,setInput]     = React.useState('');
   const [buyin,setBuyin]     = React.useState('300');
   const [ratio,setRatio]     = React.useState(2);
+  const [editing,setEditing] = React.useState(null);
+  const [editVal,setEditVal] = React.useState('');
   const isCash = mode==='cash';
   const canStart = players.length>=2;
 
@@ -346,7 +348,13 @@ function SetupScreen({mode,onStart,onBack}) {
             {players.map((p,i)=>(
               <div key={p.name} style={{display:'flex',alignItems:'center',padding:'11px 14px',borderBottom:i<players.length-1?`1px solid ${C.border}`:'none',animation:'slideUp 0.2s ease'}}>
                 <div style={{width:28,height:28,borderRadius:7,background:C.surface2,border:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'center',color:C.gold,fontSize:12,fontWeight:700,marginRight:10,flexShrink:0}}>{i+1}</div>
-                <span style={{color:C.cream,flex:1,fontSize:14}}>{p.name}</span>
+                {editing===i
+                  ?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value)}
+                    onBlur={()=>{const n=editVal.trim();if(n&&!players.find((q,j)=>j!==i&&q.name===n))setPlayers(ps=>ps.map((q,j)=>j===i?{...q,name:n}:q));setEditing(null);}}
+                    onKeyDown={e=>{if(e.key==='Enter')e.target.blur();}}
+                    style={{background:'transparent',border:'none',borderBottom:`1px solid ${C.gold}`,color:C.cream,fontSize:14,flex:1,outline:'none',padding:'2px 4px'}}/>
+                  :<span onClick={()=>{setEditing(i);setEditVal(p.name);}} style={{color:C.cream,flex:1,fontSize:14,cursor:'pointer'}}>{p.name} <span style={{color:C.dimmer,fontSize:10}}>✎</span></span>
+                }
                 <button onClick={()=>setPlayers(ps=>ps.filter((_,j)=>j!==i))} style={{background:'transparent',border:'none',cursor:'pointer',color:C.red,fontSize:18,padding:4}}>×</button>
               </div>
             ))}
@@ -379,6 +387,7 @@ function CashScreen({setup,onEnd,onBack}) {
   const [sheet,setSheet]     = React.useState(null);
   const [chipInput,setChipInput] = React.useState('');
   const [buyinAmt,setBuyinAmt]   = React.useState(String(setup.buyin));
+  const [addName,setAddName]     = React.useState('');
 
   const paid = p => p.buyins.reduce((s,b)=>s+b,0);
   const bank = players.reduce((s,p)=>s+paid(p),0);
@@ -429,8 +438,9 @@ function CashScreen({setup,onEnd,onBack}) {
         })}
       </div>
 
-      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
-        <Btn label="Финал → Расчёт" full onClick={()=>onEnd(players)}/>
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0,display:'flex',gap:8}}>
+        <Btn label="+" ghost onClick={()=>{setAddName('');setSheet({type:'addplayer'});}} style={{width:48,borderRadius:11,padding:'11px 0',fontSize:22,flexShrink:0}}/>
+        <Btn label="Финал → Расчёт" full onClick={()=>onEnd(players)} style={{flex:1,borderRadius:11}}/>
       </div>
 
       {sheet?.type==='buyin' && (
@@ -459,6 +469,17 @@ function CashScreen({setup,onEnd,onBack}) {
           </div>
         </BottomSheet>
       )}
+      {sheet?.type==='addplayer' && (
+        <BottomSheet title="Добавить игрока" onClose={()=>setSheet(null)}>
+          <Input value={addName} onChange={e=>setAddName(e.target.value)} placeholder="Имя игрока"
+            onKeyDown={e=>{if(e.key==='Enter'&&addName.trim()&&!players.find(p=>p.name===addName.trim())){setPlayers(ps=>[...ps,{name:addName.trim(),buyins:[setup.buyin],chips:null,cashedOut:false,rebuys:0,addon:0,eliminated:false,prize:0}]);setSheet(null);}}}/>
+          <div style={{fontSize:12,color:C.muted,marginTop:-6,marginBottom:12}}>Стартовый закуп: {setup.buyin}₽</div>
+          <div style={{display:'flex',gap:8}}>
+            <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
+            <Btn label="Добавить" full onClick={()=>{if(!addName.trim()||players.find(p=>p.name===addName.trim()))return;setPlayers(ps=>[...ps,{name:addName.trim(),buyins:[setup.buyin],chips:null,cashedOut:false,rebuys:0,addon:0,eliminated:false,prize:0}]);setSheet(null);}}/>
+          </div>
+        </BottomSheet>
+      )}
     </div>
   );
 }
@@ -473,7 +494,35 @@ function TournamentScreen({setup,initialPlayers,onAddon,onEnd,onBack}) {
   const [running,setRunning] = React.useState(false);
   const [sheet,setSheet]     = React.useState(null);
   const [showLevels,setShowLevels] = React.useState(false);
+  const [lastElim,setLastElim]     = React.useState(null);
+  const [addName,setAddName]       = React.useState('');
   const addonDone = setup.addonDone||false;
+  const runningRef = React.useRef(false);
+  const hiddenTs   = React.useRef(null);
+
+  React.useEffect(()=>{ runningRef.current=running; },[running]);
+
+  // Screen-lock timer fix: when screen wakes up, apply elapsed time
+  React.useEffect(()=>{
+    const handler=()=>{
+      if(document.hidden){ if(runningRef.current) hiddenTs.current=Date.now(); }
+      else {
+        if(runningRef.current&&hiddenTs.current){
+          const elapsed=Math.floor((Date.now()-hiddenTs.current)/1000);
+          hiddenTs.current=null;
+          if(elapsed<=0) return;
+          setSecs(s=>{
+            let rem=s-elapsed; let inc=0;
+            while(rem<=0){rem+=LEVEL_SECS;inc++;}
+            if(inc>0){setLvl(l=>Math.min(l+inc,BLINDS.length-1));beep();}
+            return rem;
+          });
+        }
+      }
+    };
+    document.addEventListener('visibilitychange',handler);
+    return()=>document.removeEventListener('visibilitychange',handler);
+  },[]);
 
   React.useEffect(()=>{
     if(!running) return;
@@ -508,8 +557,17 @@ function TournamentScreen({setup,initialPlayers,onAddon,onEnd,onBack}) {
   const active=players.filter(p=>!p.eliminated).length;
   const bank=players.reduce((s,p)=>s+p.buyins[0]+p.rebuys*300+p.addon,0);
 
-  const eliminate = name => { setPlayers(ps=>ps.map(p=>p.name===name?{...p,eliminated:true}:p)); setSheet(null); };
+  const eliminate = name => {
+    setLastElim(players.find(p=>p.name===name));
+    setPlayers(ps=>ps.map(p=>p.name===name?{...p,eliminated:true}:p));
+    setSheet(null);
+  };
   const rebuy = name => { setPlayers(ps=>ps.map(p=>p.name===name?{...p,rebuys:p.rebuys+1,eliminated:false}:p)); setSheet(null); };
+  const undoElim = () => {
+    if(!lastElim) return;
+    setPlayers(ps=>ps.map(p=>p.name===lastElim.name?{...lastElim}:p));
+    setLastElim(null);
+  };
 
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
@@ -534,8 +592,9 @@ function TournamentScreen({setup,initialPlayers,onAddon,onEnd,onBack}) {
         {/* Controls */}
         <div style={{display:'flex',gap:8,margin:'0 16px 10px'}}>
           <Btn label={running?'⏸ Пауза':'▶ Старт'} full onClick={()=>setRunning(r=>!r)} style={{flex:2,borderRadius:11,padding:'11px'}}/>
-          <Btn label="📋" ghost onClick={()=>setShowLevels(true)} style={{width:48,borderRadius:11,padding:'11px 0',fontSize:18}}/>
-          <Btn label="⏭" ghost onClick={()=>{setLvl(l=>Math.min(l+1,BLINDS.length-1));setSecs(LEVEL_SECS);}} style={{width:48,borderRadius:11,padding:'11px 0',fontSize:18}}/>
+          <Btn label="📋" ghost onClick={()=>setShowLevels(true)} style={{width:44,borderRadius:11,padding:'11px 0',fontSize:18}}/>
+          <Btn label="⏮" ghost onClick={()=>{setLvl(l=>Math.max(l-1,0));setSecs(LEVEL_SECS);}} style={{width:44,borderRadius:11,padding:'11px 0',fontSize:18}}/>
+          <Btn label="⏭" ghost onClick={()=>{setLvl(l=>Math.min(l+1,BLINDS.length-1));setSecs(LEVEL_SECS);}} style={{width:44,borderRadius:11,padding:'11px 0',fontSize:18}}/>
         </div>
 
         <StatBar items={[{label:'Банк',value:`${bank}₽`,accent:true},{label:'Активных',value:active},{label:'Вылетело',value:players.length-active}]}/>
@@ -555,10 +614,18 @@ function TournamentScreen({setup,initialPlayers,onAddon,onEnd,onBack}) {
         ))}
       </div>
 
-      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0,display:'flex',gap:8}}>
-        {!addonDone && <Btn label="🎰 Аддон" ghost full onClick={()=>onAddon(players)} style={{flex:1,borderRadius:11,padding:'11px'}}/>}
-        {addonDone  && <Btn label="🏁 Призы →" full onClick={()=>onEnd(players,bank)} style={{flex:2,borderRadius:11,padding:'11px'}}/>}
-        {!addonDone && <Btn label="🏁 Конец" danger onClick={()=>onEnd(players,bank)} small style={{borderRadius:11,padding:'11px 12px'}}/>}
+      <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
+        {lastElim && (
+          <button onClick={undoElim} style={{width:'100%',marginBottom:8,background:'rgba(201,168,76,0.08)',border:`1px solid ${C.borderBright}`,borderRadius:10,color:C.gold,fontSize:13,fontWeight:600,padding:'8px',cursor:'pointer'}}>
+            ↩ Отменить вылет {lastElim.name}
+          </button>
+        )}
+        <div style={{display:'flex',gap:8}}>
+          <Btn label="+" ghost onClick={()=>{setAddName('');setSheet({type:'addplayer'});}} style={{width:48,borderRadius:11,padding:'11px 0',fontSize:22,flexShrink:0}}/>
+          {!addonDone && <Btn label="🎰 Аддон" ghost full onClick={()=>onAddon(players)} style={{flex:1,borderRadius:11,padding:'11px'}}/>}
+          {addonDone  && <Btn label="🏁 Призы →" full onClick={()=>onEnd(players,bank)} style={{flex:2,borderRadius:11,padding:'11px'}}/>}
+          {!addonDone && <Btn label="🏁 Конец" danger onClick={()=>onEnd(players,bank)} small style={{borderRadius:11,padding:'11px 12px'}}/>}
+        </div>
       </div>
 
       {/* Blind levels modal */}
@@ -592,6 +659,17 @@ function TournamentScreen({setup,initialPlayers,onAddon,onEnd,onBack}) {
           <div style={{display:'flex',gap:8}}>
             <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
             <Btn label="Рибай +300₽" full onClick={()=>rebuy(sheet.player.name)}/>
+          </div>
+        </BottomSheet>
+      )}
+      {sheet?.type==='addplayer' && (
+        <BottomSheet title="Добавить игрока" onClose={()=>setSheet(null)}>
+          <Input value={addName} onChange={e=>setAddName(e.target.value)} placeholder="Имя игрока"
+            onKeyDown={e=>{if(e.key==='Enter'&&addName.trim()&&!players.find(p=>p.name===addName.trim())){setPlayers(ps=>[...ps,{name:addName.trim(),buyins:[300],chips:null,cashedOut:false,rebuys:0,addon:0,eliminated:false,prize:0}]);setSheet(null);}}}/>
+          <div style={{fontSize:12,color:C.muted,marginTop:-6,marginBottom:12}}>Стартовый закуп: 300₽</div>
+          <div style={{display:'flex',gap:8}}>
+            <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
+            <Btn label="Добавить" full onClick={()=>{if(!addName.trim()||players.find(p=>p.name===addName.trim()))return;setPlayers(ps=>[...ps,{name:addName.trim(),buyins:[300],chips:null,cashedOut:false,rebuys:0,addon:0,eliminated:false,prize:0}]);setSheet(null);}}/>
           </div>
         </BottomSheet>
       )}
@@ -632,20 +710,33 @@ function AddonScreen({players,onDone,onBack}) {
 // SCREEN: PRIZES
 // ════════════════════════════════════════════════════════
 function PrizesScreen({players,bank,onSettle,onBack}) {
-  const [prizes,setPrizes] = React.useState(['','','']);
+  const [prizes,setPrizes]   = React.useState(['','','']);
   const [winners,setWinners] = React.useState(['','','']);
+  const [fundAmt,setFundAmt] = React.useState('');
   const MEDALS=['🥇','🥈','🥉'];
 
-  const pool = bank;
+  const fund  = parseInt(fundAmt)||0;
+  const pool  = bank - fund;
   const total = prizes.reduce((s,v)=>s+(parseInt(v)||0),0);
-  const diff = pool-total;
+  const diff  = pool-total;
   const canCalc = winners[0] && (parseInt(prizes[0])||0)>0;
+  const perPerson = players.length>0 ? Math.round(fund/players.length) : 0;
 
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <Header title="Призы" sub="Распределение выплат" onBack={onBack}/>
       <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
-        <StatBar items={[{label:'Собрано',value:`${bank}₽`,accent:true}]}/>
+        <StatBar items={[{label:'Собрано',value:`${bank}₽`,accent:true},{label:'Призовой фонд',value:`${bank-fund}₽`}]}/>
+
+        {/* Банк развития */}
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
+          <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:10,fontWeight:600}}>💼 Банк развития</div>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <Input type="number" value={fundAmt} onChange={e=>setFundAmt(e.target.value)} placeholder="0" style={{flex:1}}/>
+            <span style={{color:C.muted,fontSize:14,flexShrink:0}}>₽</span>
+          </div>
+          {fund>0 && <div style={{color:C.dimmer,fontSize:12,marginTop:4}}>По {perPerson}₽ с каждого игрока</div>}
+        </div>
 
         {/* Prize amounts */}
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
@@ -680,7 +771,7 @@ function PrizesScreen({players,bank,onSettle,onBack}) {
       </div>
 
       <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
-        <Btn label="Рассчитать →" full onClick={()=>onSettle({winners,prizes:prizes.map(v=>parseInt(v)||0),fund:0,pool,players})} disabled={!canCalc}/>
+        <Btn label="Рассчитать →" full onClick={()=>onSettle({winners,prizes:prizes.map(v=>parseInt(v)||0),fund,pool,players})} disabled={!canCalc}/>
       </div>
     </div>
   );
@@ -883,7 +974,13 @@ function App() {
       return {name:p.name,sub:`Заплатил ${paid}₽${w?`  •  Приз ${w}₽`:''}`,net:bal[p.name]};
     }).sort((a,b)=>b.net-a.net);
     const transfers=simplifyDebts(bal);
-    setSettle({title:'Турнир — Расчёт',summaries,transfers,fundTransfers:[],note:null});
+    // Fund transfers: each player owes equal share, winner[0] collects
+    let fundTransfers=[];
+    if(fund>0&&winners[0]&&players.length>0){
+      const perP=Math.round(fund/players.length);
+      fundTransfers=players.filter(p=>p.name!==winners[0]).map(p=>({from:p.name,to:winners[0],amount:perP,label:'в фонд'}));
+    }
+    setSettle({title:'Турнир — Расчёт',summaries,transfers,fundTransfers,note:null});
     go('settle');
   };
 
