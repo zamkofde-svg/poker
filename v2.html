@@ -999,7 +999,7 @@ function CashFinalScreen({players,ratio,onDone,onBack}) {
 // ════════════════════════════════════════════════════════
 // SCREEN: SETTLEMENT
 // ════════════════════════════════════════════════════════
-function SettleScreen({title,summaries,transfers,fundTransfers,note,onNewGame}) {
+function SettleScreen({title,summaries,transfers,fundTransfers,note,onNewGame,onBack,onEdit,backLabel}) {
   const renderTransfer = (t,i,arr,isLast) => (
     <div key={i} style={{display:'flex',alignItems:'center',padding:'12px 14px',borderBottom:i<arr.length-1?`1px solid ${C.border}`:'none',gap:8}}>
       <span style={{color:C.red,fontWeight:600,fontSize:14}}>{t.from}</span>
@@ -1011,7 +1011,7 @@ function SettleScreen({title,summaries,transfers,fundTransfers,note,onNewGame}) 
   );
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      <Header title={title}/>
+      <Header title={title} onBack={onBack}/>
       <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
         {note && <div style={{background:'rgba(42,21,0,0.8)',border:'1px solid #9e5a00',borderRadius:10,padding:'12px',marginBottom:12,fontSize:13,color:'#ffa657'}}>{note}</div>}
 
@@ -1044,7 +1044,11 @@ function SettleScreen({title,summaries,transfers,fundTransfers,note,onNewGame}) 
           </div>
         </>}      </div>
       <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
-        <Btn label="← Новая игра" ghost full onClick={onNewGame}/>
+        {onEdit && <div style={{display:'flex',gap:8,marginBottom:8}}>
+          <Btn label={backLabel} ghost onClick={onBack} style={{flex:1,borderRadius:11,padding:'12px 8px',fontSize:14}}/>
+          <Btn label="✎ Закупы" ghost onClick={onEdit} style={{flex:1,borderRadius:11,padding:'12px 8px',fontSize:14}}/>
+        </div>}
+        <Btn label="Новая игра" full onClick={()=>{ if(!onEdit||confirm('Начать новую игру? Эту игру уже нельзя будет исправить.')) onNewGame(); }}/>
       </div>
     </div>
   );
@@ -1160,7 +1164,16 @@ function App() {
                        onEnd={handleTournEnd}/>;
       case 'addon':  return <AddonScreen players={game.players} onBack={()=>go('tourn')} onDone={handleAddonDone}/>;
       case 'prizes': return <PrizesScreen players={game.players} bank={game.bank||0} onBack={()=>go('tourn')} onSettle={handlePrizeSettle}/>;
-      case 'settle': return settle?<SettleScreen {...settle} onNewGame={()=>{lsClearGame();setSettle(null);setGame(null);setSetup(null);go('home');}}/>:home;
+      case 'settle': {
+        // С экрана расчёта можно вернуться назад, поправить закупы/фишки/призы и пересчитать.
+        const canBack = !!(setup && game?.players);
+        const isCash = mode==='cash';
+        return settle?<SettleScreen {...settle}
+                       onBack={canBack?()=>go(isCash?'cashFinal':'prizes'):undefined}
+                       onEdit={canBack?()=>go(isCash?'cash':'tourn'):undefined}
+                       backLabel={isCash?'← Фишки':'← Призы'}
+                       onNewGame={()=>{lsClearGame();setSettle(null);setGame(null);setSetup(null);go('home');}}/>:home;
+      }
       default:       return <HomeScreen onMode={m=>{setMode(m);go('setup');}}/>;
     }
   };
