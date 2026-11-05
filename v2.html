@@ -10,18 +10,40 @@
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <style>
 *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Страница сама не прокручивается: прокручиваются только списки внутри экранов (.scroll).
+   Иначе на iPhone вся страница «ездит» на высоту панели Safari и перехватывает скролл. */
+html, body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 body {
   background: #050402;
-  min-height: 100vh;
   font-family: 'Plus Jakarta Sans', sans-serif;
-  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
+/* Высота = видимая область (без клавиатуры), см. fitViewport() ниже */
 #phone-wrap {
-  width: 100% !important;
-  min-height: 100vh !important;
-  transform: none !important;
-  margin: 0 !important;
-  display: block !important;
+  position: fixed;
+  left: 0; right: 0; top: 0;
+  height: var(--app-h, 100dvh);
+  transform: translateY(var(--app-top, 0px));
+  background: #040302;
+}
+.scroll {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  min-height: 0;
+}
+/* Турнир: на высоких экранах таймер закреплён, прокручивается только список игроков.
+   На невысоких (почти все iPhone с панелями Safari) прокручивается всё под заголовком,
+   иначе под список остаётся 2–3 строки. */
+.tourn-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+@media (max-height: 760px) {
+  .tourn-body { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
+  .tourn-body > .scroll.tourn-list { flex: none; overflow: visible; }
 }
 
 /* Animations */
@@ -83,7 +105,7 @@ input[type=number] { -moz-appearance:textfield; }
 </head>
 <body>
 <script type="text/babel">
-function IOSDevice({children}){return(<div style={{width:"100%",height:"100dvh",display:"flex",flexDirection:"column",background:"#050402",overflow:"hidden"}}>{children}</div>);}
+function IOSDevice({children}){return(<div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",background:"#050402",overflow:"hidden"}}>{children}</div>);}
 </script>
 <script type="text/babel">
 
@@ -220,7 +242,7 @@ function PlayerRow({name,sub,actions,dim,badge,onClick}) {
 function BottomSheet({title,sub,onClose,children}) {
   return (
     <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.82)',backdropFilter:'blur(4px)',display:'flex',alignItems:'flex-end',zIndex:100}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:C.surface2,border:`1px solid ${C.borderBright}`,borderRadius:'18px 18px 0 0',padding:'22px 18px 32px',width:'100%',animation:'slideUp 0.28s ease'}}>
+      <div className="scroll" onClick={e=>e.stopPropagation()} style={{background:C.surface2,border:`1px solid ${C.borderBright}`,borderRadius:'18px 18px 0 0',padding:'22px 18px 32px',width:'100%',maxHeight:'100%',animation:'slideUp 0.28s ease'}}>
         <div style={{fontFamily:'Cinzel',color:C.gold,fontSize:17,marginBottom:sub?4:16}}>{title}</div>
         {sub && <div style={{color:C.muted,fontSize:13,marginBottom:16}}>{sub}</div>}
         {children}
@@ -282,7 +304,7 @@ function CashEditSheet({player,defaultBuyin,ratio,onSave,onReturn,onRemove,onClo
   const save = () => onSave(player.cashedOut?{buyins:amounts,chips:parseInt(chips)||0}:{buyins:amounts});
   return (
     <BottomSheet title="Закупы" sub={player.name} onClose={onClose}>
-      <div style={{maxHeight:'34vh',overflowY:'auto',marginBottom:8}}>
+      <div className="scroll" style={{maxHeight:'34vh',marginBottom:8}}>
         {rows.length===0 && <div style={{color:C.muted,fontSize:13,marginBottom:8}}>Закупов нет</div>}
         {rows.map((v,i)=>(
           <div key={i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
@@ -441,7 +463,7 @@ function SetupScreen({mode,onStart,onBack}) {
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <Header title={isCash?'Кэш-игра':'Турнир'} sub="Добавьте игроков" onBack={onBack}/>
 
-      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+      <div className="scroll" style={{flex:1,padding:'0 16px 12px'}}>
         {/* Buyin (cash only) */}
         {isCash && (
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
@@ -567,7 +589,7 @@ function CashScreen({setup,players,setPlayers,onEnd,onBack}) {
       </div>
       <div style={{height:2,background:`linear-gradient(90deg,transparent,${C.green},transparent)`,flexShrink:0}}/>
 
-      <div style={{flex:1,overflowY:'auto',padding:'12px 16px'}}>
+      <div className="scroll" style={{flex:1,padding:'12px 16px'}}>
         {players.map(p=>{
           const p2=paid(p);
           const net=p.cashedOut?rub(p.chips||0)-p2:null;
@@ -718,8 +740,12 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
 
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
-      <div style={{background:`linear-gradient(180deg,#050d05,${C.bg})`,flexShrink:0}}>
+      <div style={{background:'#050d05',flexShrink:0}}>
         <Header title="Турнир" onBack={onBack}/>
+      </div>
+      {/* На невысоких экранах таймер прокручивается вместе со списком (см. .tourn-body в CSS) */}
+      <div className="tourn-body">
+      <div style={{background:`linear-gradient(180deg,#050d05,${C.bg})`,flexShrink:0}}>
 
         {/* Timer */}
         <div style={{margin:'0 16px 10px',background:`radial-gradient(ellipse at center,#121d12,#090e09)`,border:`1px solid rgba(45,138,74,0.35)`,borderRadius:16,padding:'16px',textAlign:'center'}}>
@@ -748,7 +774,7 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
       </div>
       <div style={{height:2,background:`linear-gradient(90deg,transparent,${C.green},transparent)`,flexShrink:0}}/>
 
-      <div style={{flex:1,overflowY:'auto',padding:'12px 16px'}}>
+      <div className="scroll tourn-list" style={{flex:1,padding:'12px 16px'}}>
         {players.map(p=>(
           <PlayerRow key={p.name} name={p.name} dim={p.eliminated} onClick={()=>setSheet({type:'edit',name:p.name})}
             sub={`${tPaid(p)}₽${p.rebuys>0?` · ${p.rebuys}× рибай`:''}${p.addon>0?` · аддон ${p.addon}₽`:''}`}
@@ -759,6 +785,7 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
             }
           />
         ))}
+      </div>
       </div>
 
       <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
@@ -778,7 +805,7 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
       {/* Blind levels modal */}
       {showLevels && (
         <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.88)',display:'flex',alignItems:'flex-end',zIndex:100}} onClick={()=>setShowLevels(false)}>
-          <div onClick={e=>e.stopPropagation()} style={{background:C.surface2,border:`1px solid ${C.borderBright}`,borderRadius:'18px 18px 0 0',padding:'20px 18px 36px',width:'100%',maxHeight:'65%',overflow:'auto',animation:'slideUp 0.25s ease'}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.surface2,border:`1px solid ${C.borderBright}`,borderRadius:'18px 18px 0 0',padding:'20px 18px 36px',width:'100%',maxHeight:'65%',overflowY:'auto',WebkitOverflowScrolling:'touch',overscrollBehavior:'contain',animation:'slideUp 0.25s ease'}}>
             <div style={{fontFamily:'Cinzel',color:C.gold,fontSize:17,marginBottom:14}}>Структура блайндов</div>
             {BLINDS.map((b,i)=>(
               <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 0',borderBottom:`1px solid ${C.border}`,background:i===lvl?'rgba(201,168,76,0.05)':'transparent'}}>
@@ -831,7 +858,7 @@ function AddonScreen({players,onDone,onBack}) {
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <Header title="Аддон" sub="Выберите аддон для каждого игрока" onBack={onBack}/>
-      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+      <div className="scroll" style={{flex:1,padding:'0 16px 12px'}}>
         {active.map(p=>(
           <div key={p.name} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:10}}>
             <div style={{color:C.cream,fontSize:14,fontWeight:600,marginBottom:12}}>{p.name}</div>
@@ -870,7 +897,7 @@ function PrizesScreen({players,bank,onSettle,onBack}) {
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <Header title="Призы" sub="Распределение выплат" onBack={onBack}/>
-      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+      <div className="scroll" style={{flex:1,padding:'0 16px 12px'}}>
         <StatBar items={[{label:'Собрано',value:`${bank}₽`,accent:true},{label:'Призовой фонд',value:`${bank-fund}₽`}]}/>
 
         {/* Банк развития */}
@@ -957,7 +984,7 @@ function CashFinalScreen({players,ratio,onDone,onBack}) {
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <Header title="Финал" sub="Введите фишки оставшихся игроков" onBack={onBack}/>
-      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+      <div className="scroll" style={{flex:1,padding:'0 16px 12px'}}>
         {remaining.map(p=>{
           const v=chips[p.name]??'';
           const net=v!==''?rub(v)-paid(p):null;
@@ -1012,7 +1039,7 @@ function SettleScreen({title,summaries,transfers,fundTransfers,note,onNewGame,on
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <Header title={title} onBack={onBack}/>
-      <div style={{flex:1,overflowY:'auto',padding:'0 16px 12px'}}>
+      <div className="scroll" style={{flex:1,padding:'0 16px 12px'}}>
         {note && <div style={{background:'rgba(42,21,0,0.8)',border:'1px solid #9e5a00',borderRadius:10,padding:'12px',marginBottom:12,fontSize:13,color:'#ffa657'}}>{note}</div>}
 
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,overflow:'hidden',marginBottom:12}}>
@@ -1180,7 +1207,7 @@ function App() {
 
   return (
     <div>
-      <div id="phone-wrap" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#040302'}}>
+      <div id="phone-wrap">
         <IOSDevice width={390} height={844} dark>
           <div style={{flex:1,height:0,display:'flex',flexDirection:'column',background:C.bg}}>
             {renderScreen()}
@@ -1195,6 +1222,31 @@ function App() {
     </div>
   );
 }
+
+// ── VIEWPORT / KEYBOARD ─────────────────────────────────
+// На iPhone клавиатура не уменьшает 100dvh, а сдвигает видимую область.
+// Подгоняем приложение под реально видимую часть экрана, чтобы список
+// можно было докрутить до любого поля, а кнопки внизу оставались над клавиатурой.
+(function fitViewport(){
+  const vv = window.visualViewport;
+  const root = document.documentElement;
+  const apply = () => {
+    const h = vv ? vv.height : window.innerHeight;
+    root.style.setProperty('--app-h', Math.round(h)+'px');
+    root.style.setProperty('--app-top', Math.round(vv ? vv.offsetTop : 0)+'px');
+    if (window.scrollY) window.scrollTo(0,0);
+  };
+  apply();
+  if (vv) { vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); }
+  window.addEventListener('resize', apply);
+  window.addEventListener('orientationchange', () => setTimeout(apply, 300));
+  // Поле ввода, на которое нажали, прокручиваем в середину видимой области
+  document.addEventListener('focusin', e => {
+    const el = e.target;
+    if (!el || !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
+    setTimeout(() => { apply(); el.scrollIntoView({block:'center', behavior:'smooth'}); }, 350);
+  });
+})();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App/>);
