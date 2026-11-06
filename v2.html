@@ -508,6 +508,11 @@ function SetupScreen({mode,onStart,onBack}) {
   const [editVal,setEditVal] = React.useState('');
   const isCash = mode==='cash';
   const canStart = players.length>=2;
+  // Свой стартовый закуп у игрока (только кэш): пусто = общий
+  const common = parseInt(buyin)||300;
+  const startOf = p => (isCash && parseInt(p.buyin)>0) ? parseInt(p.buyin) : common;
+  const bankTotal = players.reduce((s,p)=>s+startOf(p),0);
+  const setOwn = (i,v) => setPlayers(ps=>ps.map((q,j)=>j===i?{...q,buyin:v}:q));
 
   const addPlayer = () => {
     const name=input.trim();
@@ -538,6 +543,9 @@ function SetupScreen({mode,onStart,onBack}) {
             <div style={{color:C.dimmer,fontSize:11,marginTop:7}}>
               {ratio===1?'1 фишка = 1 ₽':`${ratio} фишки = 1 ₽`}
             </div>
+            <div style={{color:C.dimmer,fontSize:11,marginTop:10,borderTop:`1px solid ${C.border}`,paddingTop:8}}>
+              Если у кого-то закуп другой — впишите сумму напротив его имени
+            </div>
           </div>
         )}
 
@@ -564,6 +572,17 @@ function SetupScreen({mode,onStart,onBack}) {
                     style={{background:'transparent',border:'none',borderBottom:`1px solid ${C.gold}`,color:C.cream,fontSize:14,flex:1,outline:'none',padding:'2px 4px'}}/>
                   :<span onClick={()=>{setEditing(i);setEditVal(p.name);}} style={{color:C.cream,flex:1,fontSize:14,cursor:'pointer'}}>{p.name} <span style={{color:C.dimmer,fontSize:10}}>✎</span></span>
                 }
+                {isCash && (()=>{
+                  const own = parseInt(p.buyin)>0 && parseInt(p.buyin)!==common;
+                  return (
+                    <div style={{display:'flex',alignItems:'center',gap:4,marginLeft:8,flexShrink:0}}>
+                      <input type="number" inputMode="numeric" value={p.buyin??''} placeholder={String(common)}
+                        onChange={e=>setOwn(i,e.target.value)} aria-label={`Стартовый закуп ${p.name}`}
+                        style={{width:76,background:own?'rgba(201,168,76,0.12)':'rgba(255,255,255,0.03)',border:`1px solid ${own?C.gold:C.border}`,borderRadius:8,color:own?C.goldLight:C.cream,fontSize:14,fontWeight:own?700:400,padding:'6px 8px',textAlign:'right',outline:'none',fontFamily:'Plus Jakarta Sans'}}/>
+                      <span style={{color:C.muted,fontSize:12}}>₽</span>
+                    </div>
+                  );
+                })()}
                 <button onClick={()=>setPlayers(ps=>ps.filter((_,j)=>j!==i))} style={{background:'transparent',border:'none',cursor:'pointer',color:C.red,fontSize:18,padding:4}}>×</button>
               </div>
             ))}
@@ -580,9 +599,13 @@ function SetupScreen({mode,onStart,onBack}) {
         </div>
         {isCash && <div style={{textAlign:'center',minWidth:64}}>
           <div style={{color:C.muted,fontSize:10}}>Банк</div>
-          <div style={{color:C.gold,fontSize:16,fontWeight:700,fontFamily:'Cinzel'}}>{buyin&&players.length?`${parseInt(buyin)*players.length}₽`:'—'}</div>
+          <div style={{color:C.gold,fontSize:16,fontWeight:700,fontFamily:'Cinzel'}}>{players.length?`${bankTotal}₽`:'—'}</div>
         </div>}
-        <Btn label="Начать →" full onClick={()=>{const b=isCash?(parseInt(buyin)||300):300;onStart({players:players.map(p=>newPlayer(p.name,b)),buyin:b,ratio});}} disabled={!canStart} style={{flex:1,borderRadius:11,fontSize:15,padding:'13px'}}/>
+        <Btn label="Начать →" full onClick={()=>{
+          const b=isCash?common:300;
+          onStart({players:players.map(p=>newPlayer(p.name,isCash?startOf(p):300)),buyin:b,ratio});
+          lsSet('d_players', players.map(({buyin:_,...q})=>q)); // свои суммы — только на эту игру
+        }} disabled={!canStart} style={{flex:1,borderRadius:11,fontSize:15,padding:'13px'}}/>
       </div>
     </div>
   );
@@ -660,7 +683,7 @@ function CashScreen({setup,players,setPlayers,onEnd,onBack}) {
               sub={`${p2}₽ · ${p.buyins.length} закуп${p.buyins.length===1?'':p.buyins.length>=2&&p.buyins.length<=4?'а':'ов'}${p.paidNow?' · рассчитался ✓':''}`}
               badge={p.cashedOut?{text:net>=0?`+${net}₽`:`${net}₽`,color:net>0?C.green:net<0?C.red:C.muted,bg:net>0?'rgba(45,138,74,0.15)':net<0?'rgba(194,59,34,0.15)':'rgba(90,78,56,0.1)',border:net>0?'rgba(45,138,74,0.3)':net<0?'rgba(194,59,34,0.3)':'transparent'}:null}
               actions={!p.cashedOut&&<>
-                <Btn label="Закуп" ghost small onClick={()=>{setBuyinAmt(String(setup.buyin));setSheet({type:'buyin',player:p});}}/>
+                <Btn label="Закуп" ghost small onClick={()=>{setBuyinAmt(String(p.buyins[0]||setup.buyin));setSheet({type:'buyin',player:p});}}/>
                 <Btn label="Выйти" danger small onClick={()=>{setChipInput('');setPayWith('');setSheet({type:'cashout',player:p});}}/>
               </>}
             />
@@ -713,7 +736,7 @@ function CashScreen({setup,players,setPlayers,onEnd,onBack}) {
           onAdd={p=>{setPlayers(ps=>[...ps,p]);setSheet(null);}}/>
       )}
       {editPlayer && (
-        <CashEditSheet key={editPlayer.name} player={editPlayer} defaultBuyin={setup.buyin} ratio={setup.ratio}
+        <CashEditSheet key={editPlayer.name} player={editPlayer} defaultBuyin={editPlayer.buyins[0]||setup.buyin} ratio={setup.ratio}
           onClose={()=>setSheet(null)} onSave={saveEdit} onRemove={removePlayer}
           onReturn={()=>saveEdit({cashedOut:false,chips:null})}/>
       )}
