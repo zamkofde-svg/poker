@@ -804,19 +804,16 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
   const tPaid = p => (p.buyins[0]||0)+p.rebuys*300+p.addon;
   const bank=players.reduce((s,p)=>s+tPaid(p),0);
 
-  const [payWith,setPayWith] = React.useState('');
+  // В турнире «рассчитаться сразу» нет: все расчёты — после раздачи призов
   const eliminate = name => {
-    const p=players.find(q=>q.name===name);
-    const paidNow = payWith ? {with:payWith,amount:-tPaid(p)} : (p.paidNow||null);
     setLastElim(name);
-    setPlayers(ps=>ps.map(q=>q.name===name?{...q,eliminated:true,paidNow,paidNowPrev:q.paidNow??null}:q));
+    setPlayers(ps=>ps.map(q=>q.name===name?{...q,eliminated:true}:q));
     setSheet(null);
   };
   const rebuy = name => { setPlayers(ps=>ps.map(p=>p.name===name?{...p,rebuys:p.rebuys+1,eliminated:false}:p)); setLastElim(null); setSheet(null); };
   const undoElim = () => {
     if(!lastElim) return;
-    // отмена вылета по ошибке — отменяем и расчёт, сделанный в этом окне
-    setPlayers(ps=>ps.map(p=>p.name===lastElim?{...p,eliminated:false,paidNow:p.paidNowPrev??null}:p));
+    setPlayers(ps=>ps.map(p=>p.name===lastElim?{...p,eliminated:false}:p));
     setLastElim(null);
   };
   const editPlayer = sheet?.type==='edit' ? players.find(p=>p.name===sheet.name) : null;
@@ -874,7 +871,7 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
             badge={p.eliminated?{text:'ВЫЛЕТЕЛ',color:C.red,bg:'rgba(194,59,34,0.15)',border:'rgba(194,59,34,0.3)'}:null}
             actions={p.eliminated
               ?<Btn label="Рибай" ghost small onClick={()=>setSheet({type:'rebuy',player:p})}/>
-              :<Btn label="Вылет" danger small onClick={()=>{setPayWith('');setSheet({type:'elim',player:p});}}/>
+              :<Btn label="Вылет" danger small onClick={()=>setSheet({type:'elim',player:p})}/>
             }
           />
         ))}
@@ -914,10 +911,7 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
       )}
 
       {sheet?.type==='elim' && (
-        <BottomSheet title="Вылет" sub={`${sheet.player.name} · взносы ${tPaid(sheet.player)}₽`} onClose={()=>setSheet(null)}>
-          {!sheet.player.paidNow && <PayNowPicker leaver={sheet.player.name} amount={-tPaid(sheet.player)} value={payWith} onChange={setPayWith}
-            candidates={players.filter(q=>!q.eliminated&&q.name!==sheet.player.name).map(q=>q.name)}/>}
-          <div style={{color:C.dimmer,fontSize:12,marginBottom:12}}>Если он займёт призовое место — приз досчитается в общем финале.</div>
+        <BottomSheet title="Вылет" sub={sheet.player.name} onClose={()=>setSheet(null)}>
           <div style={{display:'flex',gap:8}}>
             <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
             <Btn label="Подтвердить" full onClick={()=>eliminate(sheet.player.name)}/>
