@@ -257,6 +257,59 @@ function Input({value,onChange,placeholder,type='text',style={},...rest}) {
 }
 
 const newPlayer = (name,amount) => ({name,buyins:[amount],chips:null,cashedOut:false,rebuys:0,addon:0,eliminated:false,prize:0});
+
+// ── РАННИЙ УХОД: расчёт сразу ───────────────────────────
+// p.paidNow = {with, amount}: игрок ушёл раньше и уже рассчитался с игроком `with`.
+// amount > 0 — получил от него деньги, amount < 0 — отдал ему.
+// В общем финале этот перевод вычитается из балансов обоих: если потом поправили
+// фишки или закупы, разница просто уйдёт в общий расчёт.
+function applyPaidNow(bal, players) {
+  const done = [];
+  players.forEach(p=>{
+    const s = p.paidNow;
+    if(!s || !s.amount || !players.some(q=>q.name===s.with)) return;
+    bal[p.name] = (bal[p.name]||0) - s.amount;
+    bal[s.with] = (bal[s.with]||0) + s.amount;
+    done.push(s.amount>0 ? {from:s.with,to:p.name,amount:s.amount} : {from:p.name,to:s.with,amount:-s.amount});
+  });
+  return done;
+}
+const paidNowText = (name,s) => s.amount>0 ? `${s.with} → ${name} ${s.amount}₽` : `${name} → ${s.with} ${-s.amount}₽`;
+
+// Выбор: с кем ушедший рассчитывается прямо сейчас
+function PayNowPicker({leaver,amount,candidates,value,onChange}) {
+  if(!amount) return <div style={{color:C.muted,fontSize:12,marginBottom:14}}>В ноль — никому ничего не должен.</div>;
+  if(candidates.length===0) return null;
+  const q = amount>0 ? `${leaver} получает ${amount}₽. От кого?` : `${leaver} отдаёт ${-amount}₽. Кому?`;
+  const opts = [{v:'',label:'Потом, в общем расчёте'},...candidates.map(n=>({v:n,label:n}))];
+  return (
+    <div style={{marginBottom:14}}>
+      <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,fontWeight:600,marginBottom:4}}>Рассчитаться сразу</div>
+      <div style={{color:C.muted,fontSize:12,marginBottom:8}}>{q}</div>
+      <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+        {opts.map(o=>{
+          const on = value===o.v;
+          return <button key={o.v||'_later'} onClick={()=>onChange(o.v)} style={{padding:'8px 12px',borderRadius:9,fontSize:13,fontWeight:600,cursor:'pointer',border:`1.5px solid ${on?C.green:'rgba(255,255,255,0.08)'}`,background:on?'rgba(45,138,74,0.15)':'rgba(255,255,255,0.03)',color:on?C.green:C.muted}}>{o.label}</button>;
+        })}
+      </div>
+      {value && <div style={{color:C.green,fontSize:13,marginTop:8}}>✓ {paidNowText(leaver,{with:value,amount})} — сейчас, в финале это учтётся</div>}
+    </div>
+  );
+}
+
+// Уже сделанный расчёт сразу — показать и при необходимости отменить
+function PaidNowInfo({name,paidNow,onCancel}) {
+  if(!paidNow) return null;
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(45,138,74,0.08)',border:'1px solid rgba(45,138,74,0.3)',borderRadius:10,padding:'9px 12px',marginBottom:14}}>
+      <div style={{flex:1}}>
+        <div style={{color:C.green,fontSize:13,fontWeight:600}}>Рассчитался сразу: {paidNowText(name,paidNow)}</div>
+        <div style={{color:C.dimmer,fontSize:11,marginTop:2}}>Если что-то поправить, разница уйдёт в общий расчёт</div>
+      </div>
+      <button onClick={onCancel} title="Отменить расчёт" style={{background:'transparent',border:'1px solid rgba(194,59,34,0.4)',borderRadius:8,cursor:'pointer',color:C.red,fontSize:16,width:32,height:32,flexShrink:0}}>×</button>
+    </div>
+  );
+}
 const RemoveLink = ({onClick}) => (
   <button onClick={onClick} style={{width:'100%',marginTop:12,background:'transparent',border:'none',color:C.red,fontSize:13,cursor:'pointer',padding:6,opacity:0.85}}>Удалить игрока из игры</button>
 );
@@ -298,12 +351,14 @@ function AddPlayerSheet({players,defaultBuyin,onAdd,onClose}) {
 function CashEditSheet({player,defaultBuyin,ratio,onSave,onReturn,onRemove,onClose}) {
   const [rows,setRows]   = React.useState(player.buyins.map(String));
   const [chips,setChips] = React.useState(player.cashedOut?String(player.chips??0):'');
+  const [paidNow,setPaidNow] = React.useState(player.paidNow||null);
   const amounts = rows.map(v=>parseInt(v)||0).filter(v=>v>0);
   const total = amounts.reduce((s,v)=>s+v,0);
   const rub = Math.round((parseInt(chips)||0)/ratio);
-  const save = () => onSave(player.cashedOut?{buyins:amounts,chips:parseInt(chips)||0}:{buyins:amounts});
+  const save = () => onSave(player.cashedOut?{buyins:amounts,chips:parseInt(chips)||0,paidNow}:{buyins:amounts,paidNow});
   return (
     <BottomSheet title="Закупы" sub={player.name} onClose={onClose}>
+      <PaidNowInfo name={player.name} paidNow={paidNow} onCancel={()=>setPaidNow(null)}/>
       <div className="scroll" style={{maxHeight:'34vh',marginBottom:8}}>
         {rows.length===0 && <div style={{color:C.muted,fontSize:13,marginBottom:8}}>Закупов нет</div>}
         {rows.map((v,i)=>(
@@ -339,9 +394,11 @@ function TournEditSheet({player,showAddon,onSave,onRemove,onClose}) {
   const [start,setStart]   = React.useState(String(player.buyins[0]??300));
   const [rebuys,setRebuys] = React.useState(player.rebuys);
   const [addon,setAddon]   = React.useState(player.addon);
+  const [paidNow,setPaidNow] = React.useState(player.paidNow||null);
   const total = (parseInt(start)||0)+rebuys*300+addon;
   return (
     <BottomSheet title="Закупы" sub={player.name} onClose={onClose}>
+      <PaidNowInfo name={player.name} paidNow={paidNow} onCancel={()=>setPaidNow(null)}/>
       <div style={{color:C.muted,fontSize:12,marginBottom:6}}>Стартовый взнос</div>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
         <Input type="number" value={start} onChange={e=>setStart(e.target.value)} placeholder="300" style={{flex:1}}/>
@@ -364,7 +421,7 @@ function TournEditSheet({player,showAddon,onSave,onRemove,onClose}) {
       <div style={{display:'flex',justifyContent:'space-between',color:C.muted,fontSize:13,marginBottom:10}}><span>Итого</span><span style={{fontFamily:'Cinzel',color:C.gold,fontWeight:700,fontSize:15}}>{total}₽</span></div>
       <div style={{display:'flex',gap:8}}>
         <Btn label="Отмена" ghost full onClick={onClose}/>
-        <Btn label="Сохранить" full onClick={()=>onSave({buyins:[parseInt(start)||0,...player.buyins.slice(1)],rebuys,addon})}/>
+        <Btn label="Сохранить" full onClick={()=>onSave({buyins:[parseInt(start)||0,...player.buyins.slice(1)],rebuys,addon,paidNow})}/>
       </div>
       <RemoveLink onClick={onRemove}/>
     </BottomSheet>
@@ -539,6 +596,7 @@ function CashScreen({setup,players,setPlayers,onEnd,onBack}) {
   const [chipInput,setChipInput] = React.useState('');
   const [buyinAmt,setBuyinAmt]   = React.useState(String(setup.buyin));
   const [lastBuyin,setLastBuyin] = usePersist('g_lastBuyin',null);
+  const [payWith,setPayWith]     = React.useState('');
 
   const paid = p => p.buyins.reduce((s,b)=>s+b,0);
   const bank = players.reduce((s,p)=>s+paid(p),0);
@@ -563,13 +621,17 @@ function CashScreen({setup,players,setPlayers,onEnd,onBack}) {
   };
   const confirmCashout = () => {
     const chips=parseInt(chipInput); if(isNaN(chips)||chips<0) return;
-    updatePlayer(sheet.player.name,p=>({...p,chips,cashedOut:true}));
+    const net=rub(chips)-paid(sheet.player);
+    const paidNow = payWith&&net ? {with:payWith,amount:net} : null;
+    updatePlayer(sheet.player.name,p=>({...p,chips,cashedOut:true,paidNow}));
     setSheet(null);
   };
   const editPlayer = sheet?.type==='edit' ? players.find(p=>p.name===sheet.name) : null;
   const saveEdit = patch => { updatePlayer(editPlayer.name,p=>({...p,...patch})); setLastBuyin(null); setSheet(null); };
   const removePlayer = () => {
     const p=editPlayer;
+    const dep=players.find(q=>q.paidNow?.with===p.name);
+    if(dep){ alert(`С ${p.name} уже рассчитался ${dep.name}. Сначала отмените этот расчёт в карточке ${dep.name}.`); return; }
     if(!confirm(`Удалить ${p.name} из игры? Его закупы (${paid(p)}₽) уйдут из банка.`)) return;
     setPlayers(ps=>ps.filter(q=>q.name!==p.name));
     setLastBuyin(null); setSheet(null);
@@ -595,11 +657,11 @@ function CashScreen({setup,players,setPlayers,onEnd,onBack}) {
           const net=p.cashedOut?rub(p.chips||0)-p2:null;
           return (
             <PlayerRow key={p.name} name={p.name} dim={p.cashedOut} onClick={()=>setSheet({type:'edit',name:p.name})}
-              sub={`${p2}₽ · ${p.buyins.length} закуп${p.buyins.length===1?'':p.buyins.length>=2&&p.buyins.length<=4?'а':'ов'}`}
+              sub={`${p2}₽ · ${p.buyins.length} закуп${p.buyins.length===1?'':p.buyins.length>=2&&p.buyins.length<=4?'а':'ов'}${p.paidNow?' · рассчитался ✓':''}`}
               badge={p.cashedOut?{text:net>=0?`+${net}₽`:`${net}₽`,color:net>0?C.green:net<0?C.red:C.muted,bg:net>0?'rgba(45,138,74,0.15)':net<0?'rgba(194,59,34,0.15)':'rgba(90,78,56,0.1)',border:net>0?'rgba(45,138,74,0.3)':net<0?'rgba(194,59,34,0.3)':'transparent'}:null}
               actions={!p.cashedOut&&<>
                 <Btn label="Закуп" ghost small onClick={()=>{setBuyinAmt(String(setup.buyin));setSheet({type:'buyin',player:p});}}/>
-                <Btn label="Выйти" danger small onClick={()=>{setChipInput('');setSheet({type:'cashout',player:p});}}/>
+                <Btn label="Выйти" danger small onClick={()=>{setChipInput('');setPayWith('');setSheet({type:'cashout',player:p});}}/>
               </>}
             />
           );
@@ -631,13 +693,15 @@ function CashScreen({setup,players,setPlayers,onEnd,onBack}) {
         </BottomSheet>
       )}
       {sheet?.type==='cashout' && (
-        <BottomSheet title="Выход" sub={`${sheet.player.name} · фишки на руках`} onClose={()=>setSheet(null)}>
+        <BottomSheet title="Выход" sub={`${sheet.player.name} уходит · фишки на руках`} onClose={()=>setSheet(null)}>
           <Input type="number" value={chipInput} onChange={e=>setChipInput(e.target.value)} placeholder="Кол-во фишек"/>
           {chipInput && (
-            <div style={{color:hintNet>=0?C.green:C.red,fontSize:13,marginBottom:12,marginTop:-4}}>
+            <div style={{color:hintNet>=0?C.green:C.red,fontSize:13,margin:'8px 0 14px'}}>
               {hintChips} фишек = {hintRub}₽ → {hintNet>=0?'+':''}{hintNet}₽
             </div>
           )}
+          {chipInput && <PayNowPicker leaver={sheet.player.name} amount={hintNet} value={payWith} onChange={setPayWith}
+            candidates={players.filter(q=>!q.cashedOut&&q.name!==sheet.player.name).map(q=>q.name)}/>}
           <div style={{display:'flex',gap:8}}>
             <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
             <Btn label="Подтвердить" full onClick={confirmCashout}/>
@@ -717,21 +781,27 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
   const tPaid = p => (p.buyins[0]||0)+p.rebuys*300+p.addon;
   const bank=players.reduce((s,p)=>s+tPaid(p),0);
 
+  const [payWith,setPayWith] = React.useState('');
   const eliminate = name => {
+    const p=players.find(q=>q.name===name);
+    const paidNow = payWith ? {with:payWith,amount:-tPaid(p)} : (p.paidNow||null);
     setLastElim(name);
-    setPlayers(ps=>ps.map(p=>p.name===name?{...p,eliminated:true}:p));
+    setPlayers(ps=>ps.map(q=>q.name===name?{...q,eliminated:true,paidNow,paidNowPrev:q.paidNow??null}:q));
     setSheet(null);
   };
   const rebuy = name => { setPlayers(ps=>ps.map(p=>p.name===name?{...p,rebuys:p.rebuys+1,eliminated:false}:p)); setLastElim(null); setSheet(null); };
   const undoElim = () => {
     if(!lastElim) return;
-    setPlayers(ps=>ps.map(p=>p.name===lastElim?{...p,eliminated:false}:p));
+    // отмена вылета по ошибке — отменяем и расчёт, сделанный в этом окне
+    setPlayers(ps=>ps.map(p=>p.name===lastElim?{...p,eliminated:false,paidNow:p.paidNowPrev??null}:p));
     setLastElim(null);
   };
   const editPlayer = sheet?.type==='edit' ? players.find(p=>p.name===sheet.name) : null;
   const saveEdit = patch => { setPlayers(ps=>ps.map(p=>p.name===editPlayer.name?{...p,...patch}:p)); setSheet(null); };
   const removePlayer = () => {
     const p=editPlayer;
+    const dep=players.find(q=>q.paidNow?.with===p.name);
+    if(dep){ alert(`С ${p.name} уже рассчитался ${dep.name}. Сначала отмените этот расчёт в карточке ${dep.name}.`); return; }
     if(!confirm(`Удалить ${p.name} из турнира? Его взносы (${tPaid(p)}₽) уйдут из банка.`)) return;
     setPlayers(ps=>ps.filter(q=>q.name!==p.name));
     if(lastElim===p.name) setLastElim(null);
@@ -777,11 +847,11 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
       <div className="scroll tourn-list" style={{flex:1,padding:'12px 16px'}}>
         {players.map(p=>(
           <PlayerRow key={p.name} name={p.name} dim={p.eliminated} onClick={()=>setSheet({type:'edit',name:p.name})}
-            sub={`${tPaid(p)}₽${p.rebuys>0?` · ${p.rebuys}× рибай`:''}${p.addon>0?` · аддон ${p.addon}₽`:''}`}
+            sub={`${tPaid(p)}₽${p.rebuys>0?` · ${p.rebuys}× рибай`:''}${p.addon>0?` · аддон ${p.addon}₽`:''}${p.paidNow?' · рассчитался ✓':''}`}
             badge={p.eliminated?{text:'ВЫЛЕТЕЛ',color:C.red,bg:'rgba(194,59,34,0.15)',border:'rgba(194,59,34,0.3)'}:null}
             actions={p.eliminated
               ?<Btn label="Рибай" ghost small onClick={()=>setSheet({type:'rebuy',player:p})}/>
-              :<Btn label="Вылет" danger small onClick={()=>setSheet({type:'elim',player:p})}/>
+              :<Btn label="Вылет" danger small onClick={()=>{setPayWith('');setSheet({type:'elim',player:p});}}/>
             }
           />
         ))}
@@ -821,7 +891,10 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
       )}
 
       {sheet?.type==='elim' && (
-        <BottomSheet title="Вылет" sub={sheet.player.name} onClose={()=>setSheet(null)}>
+        <BottomSheet title="Вылет" sub={`${sheet.player.name} · взносы ${tPaid(sheet.player)}₽`} onClose={()=>setSheet(null)}>
+          {!sheet.player.paidNow && <PayNowPicker leaver={sheet.player.name} amount={-tPaid(sheet.player)} value={payWith} onChange={setPayWith}
+            candidates={players.filter(q=>!q.eliminated&&q.name!==sheet.player.name).map(q=>q.name)}/>}
+          <div style={{color:C.dimmer,fontSize:12,marginBottom:12}}>Если он займёт призовое место или есть банк развития — это досчитается в общем финале.</div>
           <div style={{display:'flex',gap:8}}>
             <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
             <Btn label="Подтвердить" full onClick={()=>eliminate(sheet.player.name)}/>
@@ -978,7 +1051,8 @@ function CashFinalScreen({players,ratio,onDone,onBack}) {
     const chipsOut = updated.reduce((s,p)=>s+(p.chips||0),0);
     const bal={};
     updated.forEach(p=>{ bal[p.name]=rub(p.chips||0)-paid(p); });
-    onDone({players:updated,bank,bal,chipDiff:chipsIn-chipsOut,ratio});
+    const paidNow = applyPaidNow(bal, updated);
+    onDone({players:updated,bank,bal,chipDiff:chipsIn-chipsOut,ratio,paidNow});
   };
 
   return (
@@ -1010,7 +1084,7 @@ function CashFinalScreen({players,ratio,onDone,onBack}) {
           const net=Math.round((p.chips||0)/ratio)-paid(p);
           return (
             <div key={p.name} style={{background:'rgba(0,0,0,0.2)',border:`1px solid rgba(90,78,56,0.2)`,borderRadius:13,padding:'12px 14px',marginBottom:10,opacity:0.5,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <div style={{color:C.cream,fontSize:14}}>✓ {p.name}</div>
+              <div style={{color:C.cream,fontSize:14}}>✓ {p.name}{p.paidNow && <span style={{color:C.green,fontSize:11}}> · рассчитался</span>}</div>
               <div style={{color:net>=0?C.green:C.red,fontSize:13,fontWeight:600}}>{net>=0?'+':''}{net}₽</div>
             </div>
           );
@@ -1026,7 +1100,7 @@ function CashFinalScreen({players,ratio,onDone,onBack}) {
 // ════════════════════════════════════════════════════════
 // SCREEN: SETTLEMENT
 // ════════════════════════════════════════════════════════
-function SettleScreen({title,summaries,transfers,fundTransfers,note,onNewGame,onBack,onEdit,backLabel}) {
+function SettleScreen({title,summaries,transfers,paidTransfers,fundTransfers,note,onNewGame,onBack,onEdit,backLabel}) {
   const renderTransfer = (t,i,arr,isLast) => (
     <div key={i} style={{display:'flex',alignItems:'center',padding:'12px 14px',borderBottom:i<arr.length-1?`1px solid ${C.border}`:'none',gap:8}}>
       <span style={{color:C.red,fontWeight:600,fontSize:14}}>{t.from}</span>
@@ -1064,6 +1138,13 @@ function SettleScreen({title,summaries,transfers,fundTransfers,note,onNewGame,on
             :transfers.map((t,i)=>renderTransfer(t,i,transfers))
           }
         </div>
+        {paidTransfers?.length>0 && <>
+          <div style={{color:C.green,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:4,fontWeight:600}}>✅ Уже рассчитались во время игры</div>
+          <div style={{color:C.dimmer,fontSize:12,marginBottom:8}}>Эти переводы уже сделаны и учтены выше</div>
+          <div style={{background:C.surface,border:'1px solid rgba(45,138,74,0.3)',borderRadius:13,overflow:'hidden',marginBottom:12,opacity:0.75}}>
+            {paidTransfers.map((t,i)=>renderTransfer({...t,label:'уже'},i,paidTransfers))}
+          </div>
+        </>}
         {fundTransfers?.length>0 && <>
           <div style={{color:C.muted,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:8,fontWeight:600}}>💼 Сбор в фонд</div>
           <div style={{background:C.surface,border:`1px solid rgba(90,78,56,0.4)`,borderRadius:13,overflow:'hidden',marginBottom:12}}>
@@ -1135,7 +1216,7 @@ function App() {
     go('cashFinal');
   };
 
-  const handleCashEnd = ({players,bank,bal,chipDiff,ratio}) => {
+  const handleCashEnd = ({players,bank,bal,chipDiff,ratio,paidNow}) => {
     const summaries = [...players].sort((a,b)=>{
       const an=Math.round((a.chips||0)/ratio)-a.buyins.reduce((s,b)=>s+b,0);
       const bn=Math.round((b.chips||0)/ratio)-b.buyins.reduce((s,b)=>s+b,0);
@@ -1143,11 +1224,11 @@ function App() {
     }).map(p=>{
       const p2=p.buyins.reduce((s,b)=>s+b,0);
       const rub=Math.round((p.chips||0)/ratio);
-      return {name:p.name,sub:`Закупы ${p2}₽  •  Кэш-аут ${rub}₽`,net:rub-p2};
+      return {name:p.name,sub:`Закупы ${p2}₽  •  Кэш-аут ${rub}₽${p.paidNow?'  •  ушёл раньше':''}`,net:rub-p2};
     });
     const transfers = simplifyDebts(bal);
     const note = chipDiff!==0?`⚠️ Расхождение ${Math.abs(chipDiff)} фишек — возможно кто-то пересчитал неверно`:null;
-    setSettle({title:'Кэш — Расчёт',summaries,transfers,note});
+    setSettle({title:'Кэш — Расчёт',summaries,transfers,paidTransfers:paidNow||[],note});
     go('settle');
   };
 
@@ -1166,14 +1247,17 @@ function App() {
       players.forEach(p=>{ bal[p.name]=(bal[p.name]||0)-perP; });
       bal[fundHolder]=(bal[fundHolder]||0)+fund;
     }
+    // Итог игрока (до учёта расчётов «сразу») — для списка результатов
+    const result={...bal};
+    const paidNow=applyPaidNow(bal, players);
     const summaries=[...players].map(p=>{
       const paid=p.buyins[0]+p.rebuys*300+p.addon;
       const w=[0,1,2].reduce((s,i)=>s+(winners[i]===p.name?prizes[i]:0),0);
       const fundPart=fund>0&&fundHolder?(p.name===fundHolder?`  •  Фонд +${fund}₽`:`  •  Фонд -${Math.round(fund/players.length)}₽`):'';
-      return {name:p.name,sub:`Заплатил ${paid}₽${w?`  •  Приз ${w}₽`:''}${fundPart}`,net:bal[p.name]};
+      return {name:p.name,sub:`Заплатил ${paid}₽${w?`  •  Приз ${w}₽`:''}${fundPart}${p.paidNow?'  •  ушёл раньше':''}`,net:result[p.name]};
     }).sort((a,b)=>b.net-a.net);
     const transfers=simplifyDebts(bal);
-    setSettle({title:'Турнир — Расчёт',summaries,transfers,fundTransfers:[],note:null});
+    setSettle({title:'Турнир — Расчёт',summaries,transfers,paidTransfers:paidNow,fundTransfers:[],note:null});
     go('settle');
   };
 
