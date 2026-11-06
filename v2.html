@@ -110,16 +110,52 @@ function IOSDevice({children}){return(<div style={{width:"100%",height:"100%",di
 <script type="text/babel">
 
 // ── GAME CONSTANTS ──────────────────────────────────────
-const BLINDS = [
-  {sb:5,bb:10},{sb:5,bb:15},{sb:10,bb:20},{sb:10,bb:25},{sb:15,bb:30},
-  {sb:20,bb:40},{sb:25,bb:50},{sb:30,bb:60},{sb:40,bb:80},{sb:50,bb:100},
-  {sb:60,bb:120},{sb:75,bb:150},
-  // post-addon
-  {sb:100,bb:200},{sb:150,bb:300},{sb:200,bb:400},{sb:300,bb:600},
-  {sb:500,bb:1000},{sb:750,bb:1500},{sb:1000,bb:2000},{sb:1500,bb:3000},
-];
-const ADDON_AFTER = 12;
-const LEVEL_SECS  = 600;
+// ── ТУРНИР: НАСТРОЙКИ ───────────────────────────────────
+// Задаются на экране настройки турнира и хранятся в setup.t
+const TOURN_DEFAULTS = {
+  buyin:300, stack:3000,                                       // взнос и стартовый стек
+  rebuyOn:true, rebuy:300, rebuyChips:3000, rebuyUntil:12,     // рибаи до конца уровня N (и не после аддона)
+  addonAfter:12, addon:300, addonChips:3000, addonDouble:true, // аддон после уровня N (0 — без аддона)
+  firstBB:10, speed:'normal', levelMin:10, anteFrom:0,         // структура: первый ББ, скорость, минут на уровень, анте с уровня
+};
+const tset = setup => ({...TOURN_DEFAULTS, ...(setup?.t||{})});
+function normT(raw) {
+  const d=TOURN_DEFAULTS;
+  const n=(v,def,min)=>{ const x=parseInt(v); return Number.isFinite(x)&&x>=min ? x : def; };
+  return {
+    buyin:n(raw.buyin,d.buyin,1), stack:n(raw.stack,d.stack,1),
+    rebuyOn:raw.rebuyOn!==false, rebuy:n(raw.rebuy,d.rebuy,1), rebuyChips:n(raw.rebuyChips,d.rebuyChips,1), rebuyUntil:n(raw.rebuyUntil,d.rebuyUntil,1),
+    addonAfter: raw.addonOn===false ? 0 : n(raw.addonAfter,d.addonAfter,1),
+    addon:n(raw.addon,d.addon,1), addonChips:n(raw.addonChips,d.addonChips,1), addonDouble:raw.addonDouble!==false,
+    firstBB:n(raw.firstBB,d.firstBB,2), speed:raw.speed==='fast'?'fast':'normal', levelMin:n(raw.levelMin,d.levelMin,1), anteFrom:n(raw.anteFrom,0,0),
+  };
+}
+// Структура блайндов строится от первого ББ (множители большого блайнда)
+const BLIND_STEPS = {
+  normal: [1,2,3,4,5,6,8,10,12,15,20,25,30,40,50,60,80,100,120,150,200,250,300,400,500,600,800,1000],
+  fast:   [1,2,3,5,8,10,15,20,30,50,80,100,150,200,300,500,800,1000,1500,2000],
+};
+const SPEED_LABEL = {normal:'Обычная', fast:'Быстрая'};
+function makeBlinds(t) {
+  const base = Math.max(2, parseInt(t.firstBB)||10);
+  return (BLIND_STEPS[t.speed]||BLIND_STEPS.normal).map((m,i)=>{
+    const bb = base*m;
+    const half = bb/2;
+    const sb = Number.isInteger(half) ? half : (bb>=10 ? Math.floor(half/5)*5 : Math.floor(half)) || 1;
+    const ante = t.anteFrom>0 && i+1>=t.anteFrom ? bb : 0;   // анте большого блайнда (BB ante)
+    return {sb,bb,ante};
+  });
+}
+const tournPaid  = (p,t) => (p.buyins[0]||0) + p.rebuys*t.rebuy + p.addon;
+const tournChips = (p,t) => t.stack + p.rebuys*t.rebuyChips + (t.addon>0 ? Math.round(p.addon/t.addon*t.addonChips) : 0);
+// Призовые места: стандартные раскладки, суммы округляются до 10₽, остаток — первому
+const PAYOUTS = {1:[100],2:[65,35],3:[50,30,20],4:[40,30,20,10],5:[35,25,18,13,9]};
+const defaultPlaces = n => n<=3?1 : n<=6?2 : n<=10?3 : n<=15?4 : 5;
+function splitPrizes(bank, places) {
+  const out = (PAYOUTS[places]||PAYOUTS[1]).map(x=>Math.floor(bank*x/100/10)*10);
+  out[0] += bank - out.reduce((s,v)=>s+v,0);
+  return out;
+}
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{"currency":"₽","theme":"gold"}/*EDITMODE-END*/;
 
 // ── DESIGN TOKENS ───────────────────────────────────────
@@ -149,15 +185,15 @@ function simplifyDebts(bal) {
   }
   return out;
 }
-function beep() {
+function beep(freq=880,dur=0.6) {
   try {
     const ctx=new(window.AudioContext||window.webkitAudioContext)();
     const o=ctx.createOscillator(),g=ctx.createGain();
     o.connect(g);g.connect(ctx.destination);
-    o.frequency.value=880;
+    o.frequency.value=freq;
     g.gain.setValueAtTime(0.3,ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.6);
-    o.start(ctx.currentTime);o.stop(ctx.currentTime+0.6);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);
+    o.start(ctx.currentTime);o.stop(ctx.currentTime+dur);
   }catch(e){}
 }
 
@@ -390,29 +426,30 @@ function CashEditSheet({player,defaultBuyin,ratio,onSave,onReturn,onRemove,onClo
 }
 
 // Турнир: правка взноса, рибаев, аддона
-function TournEditSheet({player,showAddon,onSave,onRemove,onClose}) {
-  const [start,setStart]   = React.useState(String(player.buyins[0]??300));
+function TournEditSheet({player,t,showAddon,onSave,onRemove,onClose}) {
+  const [start,setStart]   = React.useState(String(player.buyins[0]??t.buyin));
   const [rebuys,setRebuys] = React.useState(player.rebuys);
   const [addon,setAddon]   = React.useState(player.addon);
   const [paidNow,setPaidNow] = React.useState(player.paidNow||null);
-  const total = (parseInt(start)||0)+rebuys*300+addon;
+  const total = (parseInt(start)||0)+rebuys*t.rebuy+addon;
+  const addonOpts = t.addonDouble ? [t.addon*2,t.addon,0] : [t.addon,0];
   return (
     <BottomSheet title="Закупы" sub={player.name} onClose={onClose}>
       <PaidNowInfo name={player.name} paidNow={paidNow} onCancel={()=>setPaidNow(null)}/>
       <div style={{color:C.muted,fontSize:12,marginBottom:6}}>Стартовый взнос</div>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-        <Input type="number" value={start} onChange={e=>setStart(e.target.value)} placeholder="300" style={{flex:1}}/>
+        <Input type="number" value={start} onChange={e=>setStart(e.target.value)} placeholder={String(t.buyin)} style={{flex:1}}/>
         <span style={{color:C.muted,fontSize:14}}>₽</span>
       </div>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-        <div><div style={{color:C.cream,fontSize:14}}>Рибаи</div><div style={{color:C.dimmer,fontSize:12}}>по 300₽</div></div>
+      {(t.rebuyOn||rebuys>0) && <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+        <div><div style={{color:C.cream,fontSize:14}}>Рибаи</div><div style={{color:C.dimmer,fontSize:12}}>по {t.rebuy}₽</div></div>
         <Stepper value={rebuys} onChange={setRebuys}/>
-      </div>
+      </div>}
       {showAddon && (
         <div style={{marginBottom:14}}>
           <div style={{color:C.muted,fontSize:12,marginBottom:6}}>Аддон</div>
           <div style={{display:'flex',gap:8}}>
-            {[600,300,0].map(v=>(
+            {addonOpts.map(v=>(
               <button key={v} onClick={()=>setAddon(v)} style={{flex:1,padding:'9px 6px',borderRadius:9,fontSize:14,fontWeight:600,cursor:'pointer',border:`1.5px solid ${addon===v?C.green:'rgba(255,255,255,0.06)'}`,background:addon===v?'rgba(45,138,74,0.15)':'rgba(255,255,255,0.02)',color:addon===v?C.green:C.muted}}>{v?`${v}₽`:'Без'}</button>
             ))}
           </div>
@@ -496,6 +533,99 @@ function HomeScreen({onMode}) {
   );
 }
 
+// ── Настройки турнира (на экране настройки) ─────────────
+const NumField = ({label,value,onChange,suffix,placeholder}) => (
+  <div style={{minWidth:0}}>
+    <div style={{color:C.muted,fontSize:11,marginBottom:4}}>{label}</div>
+    <div style={{display:'flex',alignItems:'center',gap:6}}>
+      <Input type="number" value={value??''} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{flex:1,minWidth:0,padding:'9px 10px',fontSize:14}}/>
+      {suffix && <span style={{color:C.muted,fontSize:12,flexShrink:0}}>{suffix}</span>}
+    </div>
+  </div>
+);
+const Toggle = ({on,onChange,label}) => (
+  <button onClick={()=>onChange(!on)} style={{display:'flex',alignItems:'center',gap:10,background:'transparent',border:'none',cursor:'pointer',padding:'4px 0',color:on?C.cream:C.muted,fontSize:14,fontFamily:'Plus Jakarta Sans'}}>
+    <span style={{width:38,height:22,borderRadius:11,background:on?C.green:'rgba(255,255,255,0.12)',position:'relative',transition:'background 0.15s',flexShrink:0}}>
+      <span style={{position:'absolute',top:3,left:on?19:3,width:16,height:16,borderRadius:8,background:'#f0e2c0',transition:'left 0.15s'}}/>
+    </span>
+    {label}
+  </button>
+);
+const grid2 = {display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12};
+function TournSettings({raw,t,set,open,setOpen}) {
+  const blinds = makeBlinds(t);
+  const preview = blinds.slice(0,6).map(b=>`${b.sb}/${b.bb}`).join(' · ')+' …';
+  const summary = [`взнос ${t.buyin}₽`,`стек ${t.stack}`,`ББ ${t.firstBB}`,`${t.levelMin} мин`,
+    t.rebuyOn?`рибаи до ${t.rebuyUntil} ур.`:'без рибаев', t.addonAfter?`аддон после ${t.addonAfter}`:'без аддона'].join(' · ');
+  const card = {background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12};
+  const head = {color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,fontWeight:600};
+  if(!open) return (
+    <button onClick={()=>setOpen(true)} style={{...card,width:'100%',textAlign:'left',cursor:'pointer',display:'block'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+        <span style={head}>⚙️ Настройки турнира</span><span style={{color:C.gold,fontSize:12}}>Изменить ›</span>
+      </div>
+      <div style={{color:C.muted,fontSize:12,lineHeight:1.5}}>{summary}</div>
+      <div style={{color:C.dimmer,fontSize:12,marginTop:4}}>Блайнды: {preview}</div>
+    </button>
+  );
+  return (
+    <div style={card}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <span style={head}>⚙️ Настройки турнира</span>
+        <button onClick={()=>setOpen(false)} style={{background:'transparent',border:'none',color:C.gold,fontSize:12,cursor:'pointer'}}>Свернуть</button>
+      </div>
+      <div style={grid2}>
+        <NumField label="Взнос" value={raw.buyin} onChange={v=>set('buyin',v)} suffix="₽" placeholder="300"/>
+        <NumField label="Стартовый стек" value={raw.stack} onChange={v=>set('stack',v)} suffix="фиш." placeholder="3000"/>
+      </div>
+
+      <div style={{...head,color:C.muted,marginBottom:8}}>Блайнды</div>
+      <div style={grid2}>
+        <NumField label="Первый большой блайнд" value={raw.firstBB} onChange={v=>set('firstBB',v)} placeholder="10"/>
+        <NumField label="Уровень" value={raw.levelMin} onChange={v=>set('levelMin',v)} suffix="мин" placeholder="10"/>
+      </div>
+      <div style={{display:'flex',gap:6,marginBottom:8}}>
+        {['normal','fast'].map(k=>(
+          <button key={k} onClick={()=>set('speed',k)} style={{flex:1,padding:'8px 4px',borderRadius:9,fontSize:13,fontWeight:600,cursor:'pointer',border:`1.5px solid ${t.speed===k?C.green:'rgba(255,255,255,0.08)'}`,background:t.speed===k?'rgba(45,138,74,0.15)':'rgba(255,255,255,0.03)',color:t.speed===k?C.green:C.muted}}>{SPEED_LABEL[k]}</button>
+        ))}
+      </div>
+      <div style={{color:C.dimmer,fontSize:12,marginBottom:10}}>{preview}</div>
+      <div style={grid2}>
+        <NumField label="Анте (ББ-анте) с уровня" value={raw.anteFrom||''} onChange={v=>set('anteFrom',v)} placeholder="нет"/>
+        <div/>
+      </div>
+
+      <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10,marginBottom:6}}>
+        <Toggle on={t.rebuyOn} onChange={v=>set('rebuyOn',v)} label="Рибаи"/>
+      </div>
+      {t.rebuyOn && <>
+        <div style={grid2}>
+          <NumField label="Рибай" value={raw.rebuy} onChange={v=>set('rebuy',v)} suffix="₽" placeholder="300"/>
+          <NumField label="Фишек за рибай" value={raw.rebuyChips} onChange={v=>set('rebuyChips',v)} placeholder="3000"/>
+        </div>
+        <div style={grid2}>
+          <NumField label="До конца уровня" value={raw.rebuyUntil} onChange={v=>set('rebuyUntil',v)} placeholder="12"/>
+          <div style={{color:C.dimmer,fontSize:11,alignSelf:'end',paddingBottom:4}}>После аддона рибаев нет</div>
+        </div>
+      </>}
+
+      <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10,marginBottom:6}}>
+        <Toggle on={raw.addonOn!==false} onChange={v=>set('addonOn',v)} label="Аддон"/>
+      </div>
+      {raw.addonOn!==false && <>
+        <div style={grid2}>
+          <NumField label="Аддон" value={raw.addon} onChange={v=>set('addon',v)} suffix="₽" placeholder="300"/>
+          <NumField label="Фишек за аддон" value={raw.addonChips} onChange={v=>set('addonChips',v)} placeholder="3000"/>
+        </div>
+        <div style={grid2}>
+          <NumField label="После уровня" value={raw.addonAfter} onChange={v=>set('addonAfter',v)} placeholder="12"/>
+          <div style={{alignSelf:'end'}}><Toggle on={t.addonDouble} onChange={v=>set('addonDouble',v)} label="Двойной"/></div>
+        </div>
+      </>}
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════
 // SCREEN: SETUP
 // ════════════════════════════════════════════════════════
@@ -506,7 +636,11 @@ function SetupScreen({mode,onStart,onBack}) {
   const [ratio,setRatio]     = usePersist('d_ratio',2);
   const [editing,setEditing] = React.useState(null);
   const [editVal,setEditVal] = React.useState('');
+  const [tRaw,setTRaw]       = usePersist('d_tset',{...TOURN_DEFAULTS,addonOn:true});
+  const [tOpen,setTOpen]     = React.useState(false);
   const isCash = mode==='cash';
+  const tCfg = normT(tRaw);
+  const setT = (k,v) => setTRaw(r=>({...r,[k]:v}));
   const canStart = players.length>=2;
   // Свой стартовый закуп у игрока (только кэш): пусто = общий
   const common = parseInt(buyin)||300;
@@ -548,6 +682,9 @@ function SetupScreen({mode,onStart,onBack}) {
             </div>
           </div>
         )}
+
+        {/* Tournament settings */}
+        {!isCash && <TournSettings raw={tRaw} t={tCfg} set={setT} open={tOpen} setOpen={setTOpen}/>}
 
         {/* Add player */}
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
@@ -597,13 +734,13 @@ function SetupScreen({mode,onStart,onBack}) {
           <div style={{color:C.muted,fontSize:10}}>Игроков</div>
           <div style={{color:C.cream,fontSize:16,fontWeight:700,fontFamily:'Cinzel'}}>{players.length}</div>
         </div>
-        {isCash && <div style={{textAlign:'center',minWidth:64}}>
+        <div style={{textAlign:'center',minWidth:64}}>
           <div style={{color:C.muted,fontSize:10}}>Банк</div>
-          <div style={{color:C.gold,fontSize:16,fontWeight:700,fontFamily:'Cinzel'}}>{players.length?`${bankTotal}₽`:'—'}</div>
-        </div>}
+          <div style={{color:C.gold,fontSize:16,fontWeight:700,fontFamily:'Cinzel'}}>{players.length?`${isCash?bankTotal:players.length*tCfg.buyin}₽`:'—'}</div>
+        </div>
         <Btn label="Начать →" full onClick={()=>{
-          const b=isCash?common:300;
-          onStart({players:players.map(p=>newPlayer(p.name,isCash?startOf(p):300)),buyin:b,ratio});
+          const b=isCash?common:tCfg.buyin;
+          onStart({players:players.map(p=>newPlayer(p.name,isCash?startOf(p):tCfg.buyin)),buyin:b,ratio,...(isCash?{}:{t:tCfg})});
           lsSet('d_players', players.map(({buyin:_,...q})=>q)); // свои суммы — только на эту игру
         }} disabled={!canStart} style={{flex:1,borderRadius:11,fontSize:15,padding:'13px'}}/>
       </div>
@@ -744,18 +881,49 @@ function CashScreen({setup,players,setPlayers,onEnd,onBack}) {
   );
 }
 
+// Крупные часы турнира — для телефона на столе или экрана/ТВ
+function TvClock({level,blind,next,mm,ss,pct,color,secs,running,onToggle,onClose,active,total,avgBB,bank,addonNext}) {
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:300,background:'radial-gradient(ellipse at center,#0f1a0f,#050605 70%)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'4vh 4vw',textAlign:'center',userSelect:'none'}}>
+      <button onClick={onClose} style={{position:'absolute',top:12,right:14,background:'transparent',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,padding:'6px 12px',cursor:'pointer'}}>✕ Закрыть</button>
+      <div style={{color:C.muted,fontSize:'min(4vw,4vh)',textTransform:'uppercase',letterSpacing:2}}>{level}</div>
+      <div style={{fontFamily:'Cinzel',color:'#ffa657',fontWeight:700,fontSize:'min(11vw,12vh)',lineHeight:1.1,margin:'1vh 0'}}>{blind.sb} / {blind.bb}</div>
+      {blind.ante>0 && <div style={{color:C.cream,fontSize:'min(4.5vw,5vh)'}}>анте {blind.ante}</div>}
+      <div style={{fontFamily:'Cinzel',fontWeight:700,color,fontSize:'min(26vw,30vh)',lineHeight:1,margin:'2vh 0',animation:secs<=30?'urgentPulse 0.5s ease infinite':undefined}}>{mm}:{ss}</div>
+      <div style={{width:'70%',height:6,background:'rgba(255,255,255,0.08)',borderRadius:3,overflow:'hidden',marginBottom:'2vh'}}>
+        <div style={{height:'100%',width:`${pct}%`,background:`linear-gradient(90deg,${C.green},#4dc46a)`,transition:'width 1s linear'}}/>
+      </div>
+      <div style={{color:C.muted,fontSize:'min(4vw,4.5vh)',marginBottom:'3vh'}}>
+        {addonNext?'После этого уровня — АДДОН':`Далее: ${next.sb} / ${next.bb}${next.ante?` · анте ${next.ante}`:''}`}
+      </div>
+      <div style={{display:'flex',gap:'6vw',color:C.cream,fontSize:'min(4vw,4.5vh)'}}>
+        <div><div style={{color:C.dimmer,fontSize:'0.6em',textTransform:'uppercase'}}>Игроков</div>{active}/{total}</div>
+        <div><div style={{color:C.dimmer,fontSize:'0.6em',textTransform:'uppercase'}}>Ср. стек</div>{avgBB} ББ</div>
+        <div><div style={{color:C.dimmer,fontSize:'0.6em',textTransform:'uppercase'}}>Банк</div>{bank}₽</div>
+      </div>
+      <button onClick={onToggle} style={{marginTop:'4vh',background:running?'transparent':`linear-gradient(135deg,#c9a84c,#e8c86a)`,border:`1px solid ${C.borderBright}`,borderRadius:12,color:running?C.gold:'#0a0906',fontSize:16,fontWeight:700,padding:'10px 28px',cursor:'pointer'}}>{running?'⏸ Пауза':'▶ Старт'}</button>
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════
 // SCREEN: TOURNAMENT
 // ════════════════════════════════════════════════════════
 function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
+  // Структура, длина уровня и аддон — из настроек турнира
+  const t = tset(setup);
+  const BLINDS = React.useMemo(()=>makeBlinds(t),[setup]);
+  const LEVEL_SECS  = t.levelMin*60;
+  const ADDON_AFTER = t.addonAfter;           // 0 — турнир без аддона
   // Таймер хранит момент окончания уровня (endsAt), а не счётчик секунд:
   // так время идёт правильно при блокировке экрана, свёрнутом браузере и перезагрузке.
   const [tm,setTm]   = usePersist('g_timer',{lvl:0,left:LEVEL_SECS,endsAt:null});
   const [now,setNow] = React.useState(Date.now());
   const [sheet,setSheet]     = React.useState(null);
   const [showLevels,setShowLevels] = React.useState(false);
+  const [tv,setTv]                 = React.useState(false);
   const [lastElim,setLastElim]     = usePersist('g_lastElim',null);
-  const addonDone = setup.addonDone||false;
+  const addonDone = setup.addonDone || !ADDON_AFTER;
   const running = tm.endsAt!=null;
   const lvl = tm.lvl;
   const secs = running ? Math.min(LEVEL_SECS,Math.max(0,Math.ceil((tm.endsAt-now)/1000))) : tm.left;
@@ -784,6 +952,25 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
     if(addonStop) setTimeout(()=>alert('🎰 Время аддона!'),100);
   },[now,running,tm.endsAt]);
 
+  // Сигнал за минуту до конца уровня (один раз на уровень)
+  const warnedRef = React.useRef(null);
+  React.useEffect(()=>{
+    if(!running || secs>60 || secs<=0 || warnedRef.current===lvl) return;
+    warnedRef.current = lvl;
+    beep(660,0.25); setTimeout(()=>beep(660,0.25),350);
+    if(navigator.vibrate) navigator.vibrate(150);
+  },[running,secs<=60,lvl]);
+
+  // Экран не гаснет, пока идёт таймер
+  React.useEffect(()=>{
+    if(!running || !('wakeLock' in navigator)) return;
+    let lock=null, alive=true;
+    const req=async()=>{ try{ if(alive&&!document.hidden) lock=await navigator.wakeLock.request('screen'); }catch(e){} };
+    req();
+    document.addEventListener('visibilitychange',req);
+    return ()=>{ alive=false; document.removeEventListener('visibilitychange',req); try{ lock&&lock.release(); }catch(e){} };
+  },[running]);
+
   const toggleRun = () => {
     const n=Date.now(); setNow(n);
     setTm(t=>t.endsAt!=null?{...t,left:Math.max(1,Math.ceil((t.endsAt-n)/1000)),endsAt:null}:{...t,endsAt:n+t.left*1000});
@@ -799,21 +986,27 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
   const ss2=String(secs%60).padStart(2,'0');
   const pct=(secs/LEVEL_SECS)*100;
   const timeColor=secs<=30?C.red:secs<=90?'#ffa657':C.green;
-  const isPreAddon=lvl<ADDON_AFTER;
+  const levelLabel = !ADDON_AFTER ? `Уровень ${lvl+1}` : lvl<ADDON_AFTER ? `Уровень ${lvl+1} / ${ADDON_AFTER}` : `Уровень ${lvl+1} (после аддона)`;
   const active=players.filter(p=>!p.eliminated).length;
-  const tPaid = p => (p.buyins[0]||0)+p.rebuys*300+p.addon;
+  const tPaid = p => tournPaid(p,t);
   const bank=players.reduce((s,p)=>s+tPaid(p),0);
+  // Средний стек в больших блайндах: все фишки в игре / игроков за столом
+  const totalChips = players.reduce((s,p)=>s+tournChips(p,t),0);
+  const avgBB = active ? Math.round(totalChips/active/blind.bb) : 0;
+  // Рибаи: только до конца уровня rebuyUntil и не после аддона
+  const canRebuy = t.rebuyOn && !setup.addonDone && lvl+1<=t.rebuyUntil;
 
-  // В турнире «рассчитаться сразу» нет: все расчёты — после раздачи призов
+  // В турнире «рассчитаться сразу» нет: все расчёты — после раздачи призов.
+  // elimAt — момент вылета: по нему на экране призов расставляются места.
   const eliminate = name => {
     setLastElim(name);
-    setPlayers(ps=>ps.map(q=>q.name===name?{...q,eliminated:true}:q));
+    setPlayers(ps=>ps.map(q=>q.name===name?{...q,eliminated:true,elimAt:Date.now()}:q));
     setSheet(null);
   };
-  const rebuy = name => { setPlayers(ps=>ps.map(p=>p.name===name?{...p,rebuys:p.rebuys+1,eliminated:false}:p)); setLastElim(null); setSheet(null); };
+  const rebuy = name => { setPlayers(ps=>ps.map(p=>p.name===name?{...p,rebuys:p.rebuys+1,eliminated:false,elimAt:null}:p)); setLastElim(null); setSheet(null); };
   const undoElim = () => {
     if(!lastElim) return;
-    setPlayers(ps=>ps.map(p=>p.name===lastElim?{...p,eliminated:false}:p));
+    setPlayers(ps=>ps.map(p=>p.name===lastElim?{...p,eliminated:false,elimAt:null}:p));
     setLastElim(null);
   };
   const editPlayer = sheet?.type==='edit' ? players.find(p=>p.name===sheet.name) : null;
@@ -839,16 +1032,15 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
 
         {/* Timer */}
         <div style={{margin:'0 16px 10px',background:`radial-gradient(ellipse at center,#121d12,#090e09)`,border:`1px solid rgba(45,138,74,0.35)`,borderRadius:16,padding:'16px',textAlign:'center'}}>
-          <div style={{color:C.muted,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:2}}>
-            {isPreAddon?`Уровень ${lvl+1} / ${ADDON_AFTER}`:`Уровень ${lvl+1} (после аддона)`}
-          </div>
-          <div style={{fontFamily:'Cinzel',fontSize:16,color:'#ffa657',fontWeight:700,marginBottom:8}}>{blind.sb} / {blind.bb}</div>
+          <div style={{color:C.muted,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:2}}>{levelLabel}</div>
+          <div style={{fontFamily:'Cinzel',fontSize:16,color:'#ffa657',fontWeight:700,marginBottom:8}}>{blind.sb} / {blind.bb}{blind.ante?<span style={{fontSize:12,color:C.muted}}> · анте {blind.ante}</span>:null}</div>
           <div style={{fontFamily:'Cinzel',fontSize:48,fontWeight:700,color:timeColor,letterSpacing:2,lineHeight:1,animation:secs<=30?'urgentPulse 0.5s ease infinite':undefined}}>{mm}:{ss2}</div>
           <div style={{margin:'8px auto',width:'75%',height:3,background:'rgba(255,255,255,0.07)',borderRadius:2,overflow:'hidden'}}>
             <div style={{height:'100%',width:`${pct}%`,background:`linear-gradient(90deg,${C.green},#4dc46a)`,borderRadius:2,transition:'width 1s linear'}}/>
           </div>
           <div style={{color:C.dimmer,fontSize:12}}>
-            {lvl===ADDON_AFTER-1&&!addonDone?'После этого уровня — АДДОН':`Следующий: ${nextBlind.sb} / ${nextBlind.bb}`}
+            {lvl===ADDON_AFTER-1&&!addonDone?'После этого уровня — АДДОН':`Следующий: ${nextBlind.sb} / ${nextBlind.bb}${nextBlind.ante?` · анте ${nextBlind.ante}`:''}`}
+            {canRebuy && lvl+1===t.rebuyUntil && <div style={{color:'#ffa657',marginTop:2}}>Последний уровень рибаев</div>}
           </div>
         </div>
 
@@ -858,9 +1050,10 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
           <Btn label="📋" ghost onClick={()=>setShowLevels(true)} style={{width:44,borderRadius:11,padding:'11px 0',fontSize:18}}/>
           <Btn label="⏮" ghost onClick={()=>jumpLevel(-1)} style={{width:44,borderRadius:11,padding:'11px 0',fontSize:18}}/>
           <Btn label="⏭" ghost onClick={()=>jumpLevel(1)} style={{width:44,borderRadius:11,padding:'11px 0',fontSize:18}}/>
+          <Btn label="📺" ghost onClick={()=>setTv(true)} style={{width:44,borderRadius:11,padding:'11px 0',fontSize:18}}/>
         </div>
 
-        <StatBar items={[{label:'Банк',value:`${bank}₽`,accent:true},{label:'Активных',value:active},{label:'Вылетело',value:players.length-active}]}/>
+        <StatBar items={[{label:'Банк',value:`${bank}₽`,accent:true},{label:'За столом',value:`${active}/${players.length}`},{label:'Ср. стек',value:`${avgBB} ББ`}]}/>
       </div>
       <div style={{height:2,background:`linear-gradient(90deg,transparent,${C.green},transparent)`,flexShrink:0}}/>
 
@@ -870,7 +1063,7 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
             sub={`${tPaid(p)}₽${p.rebuys>0?` · ${p.rebuys}× рибай`:''}${p.addon>0?` · аддон ${p.addon}₽`:''}${p.paidNow?' · рассчитался ✓':''}`}
             badge={p.eliminated?{text:'ВЫЛЕТЕЛ',color:C.red,bg:'rgba(194,59,34,0.15)',border:'rgba(194,59,34,0.3)'}:null}
             actions={p.eliminated
-              ?<Btn label="Рибай" ghost small onClick={()=>setSheet({type:'rebuy',player:p})}/>
+              ?(canRebuy?<Btn label="Рибай" ghost small onClick={()=>setSheet({type:'rebuy',player:p})}/>:null)
               :<Btn label="Вылет" danger small onClick={()=>setSheet({type:'elim',player:p})}/>
             }
           />
@@ -897,12 +1090,13 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
         <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.88)',display:'flex',alignItems:'flex-end',zIndex:100}} onClick={()=>setShowLevels(false)}>
           <div onClick={e=>e.stopPropagation()} style={{background:C.surface2,border:`1px solid ${C.borderBright}`,borderRadius:'18px 18px 0 0',padding:'20px 18px 36px',width:'100%',maxHeight:'65%',overflowY:'auto',WebkitOverflowScrolling:'touch',overscrollBehavior:'contain',animation:'slideUp 0.25s ease'}}>
             <div style={{fontFamily:'Cinzel',color:C.gold,fontSize:17,marginBottom:14}}>Структура блайндов</div>
+            <div style={{color:C.dimmer,fontSize:12,marginBottom:10}}>{SPEED_LABEL[t.speed]} · первый ББ {t.firstBB} · {t.levelMin} мин на уровень</div>
             {BLINDS.map((b,i)=>(
               <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 0',borderBottom:`1px solid ${C.border}`,background:i===lvl?'rgba(201,168,76,0.05)':'transparent'}}>
                 <span style={{color:i===lvl?C.gold:C.muted,fontSize:12}}>
-                  {i===ADDON_AFTER?'🎰 ':''}{i<ADDON_AFTER?`Ур. ${i+1}`:`Ур. ${i+1} (пост-аддон)`}
+                  {ADDON_AFTER&&i===ADDON_AFTER?'🎰 ':''}Ур. {i+1}{t.rebuyOn&&i+1===t.rebuyUntil?' · посл. рибай':''}
                 </span>
-                <span style={{color:i===lvl?C.cream:C.muted,fontSize:14,fontWeight:600,fontFamily:'Cinzel'}}>{b.sb} / {b.bb}</span>
+                <span style={{color:i===lvl?C.cream:C.muted,fontSize:14,fontWeight:600,fontFamily:'Cinzel'}}>{b.sb} / {b.bb}{b.ante?<span style={{fontSize:11,fontFamily:'Plus Jakarta Sans',fontWeight:400}}> +{b.ante}</span>:null}</span>
                 {i===lvl&&<span style={{color:C.green,fontSize:10}}>← сейчас</span>}
               </div>
             ))}
@@ -919,21 +1113,24 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
         </BottomSheet>
       )}
       {sheet?.type==='rebuy' && (
-        <BottomSheet title="Рибай" sub={`${sheet.player.name} · +300₽ = 3000 фишек`} onClose={()=>setSheet(null)}>
+        <BottomSheet title="Рибай" sub={`${sheet.player.name} · +${t.rebuy}₽ = ${t.rebuyChips} фишек`} onClose={()=>setSheet(null)}>
           <div style={{display:'flex',gap:8}}>
             <Btn label="Отмена" ghost full onClick={()=>setSheet(null)}/>
-            <Btn label="Рибай +300₽" full onClick={()=>rebuy(sheet.player.name)}/>
+            <Btn label={`Рибай +${t.rebuy}₽`} full onClick={()=>rebuy(sheet.player.name)}/>
           </div>
         </BottomSheet>
       )}
       {sheet?.type==='addplayer' && (
-        <AddPlayerSheet players={players} defaultBuyin={300} onClose={()=>setSheet(null)}
+        <AddPlayerSheet players={players} defaultBuyin={t.buyin} onClose={()=>setSheet(null)}
           onAdd={p=>{setPlayers(ps=>[...ps,p]);setSheet(null);}}/>
       )}
       {editPlayer && (
-        <TournEditSheet key={editPlayer.name} player={editPlayer} showAddon={addonDone||editPlayer.addon>0}
+        <TournEditSheet key={editPlayer.name} player={editPlayer} t={t} showAddon={(ADDON_AFTER&&setup.addonDone)||editPlayer.addon>0}
           onClose={()=>setSheet(null)} onSave={saveEdit} onRemove={removePlayer}/>
       )}
+      {tv && <TvClock level={levelLabel} blind={blind} next={nextBlind} mm={mm} ss={ss2} pct={pct} color={timeColor} secs={secs}
+        running={running} onToggle={toggleRun} onClose={()=>setTv(false)} active={active} total={players.length} avgBB={avgBB} bank={bank}
+        addonNext={lvl===ADDON_AFTER-1&&!addonDone}/>}
     </div>
   );
 }
@@ -941,19 +1138,20 @@ function TournamentScreen({setup,players,setPlayers,onAddon,onEnd,onBack}) {
 // ════════════════════════════════════════════════════════
 // SCREEN: ADDON
 // ════════════════════════════════════════════════════════
-function AddonScreen({players,onDone,onBack}) {
+function AddonScreen({players,t,onDone,onBack}) {
   const active = players.filter(p=>!p.eliminated);
+  const opts = (t.addonDouble ? [t.addon*2,t.addon,0] : [t.addon,0]).map(v=>({val:v,label:v?`${v}₽`:'Без'}));
   const [sel,setSel] = usePersist('g_addonSel',()=>Object.fromEntries(active.map(p=>[p.name,0])));
 
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      <Header title="Аддон" sub="Выберите аддон для каждого игрока" onBack={onBack}/>
+      <Header title="Аддон" sub={`${t.addon}₽ = ${t.addonChips} фишек${t.addonDouble?' · можно двойной':''}`} onBack={onBack}/>
       <div className="scroll" style={{flex:1,padding:'0 16px 12px'}}>
         {active.map(p=>(
           <div key={p.name} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:10}}>
             <div style={{color:C.cream,fontSize:14,fontWeight:600,marginBottom:12}}>{p.name}</div>
             <div style={{display:'flex',gap:8}}>
-              {[{val:600,label:'600₽'},{val:300,label:'300₽'},{val:0,label:'Без'}].map(({val,label})=>(
+              {opts.map(({val,label})=>(
                 <button key={val} onClick={()=>setSel(s=>({...s,[p.name]:val}))} style={{flex:1,padding:'10px 6px',borderRadius:9,fontSize:14,fontWeight:600,cursor:'pointer',border:`1.5px solid ${sel[p.name]===val?(val===0?'rgba(90,78,56,0.6)':C.green):'rgba(255,255,255,0.06)'}`,background:sel[p.name]===val?(val===0?'rgba(90,78,56,0.1)':'rgba(45,138,74,0.15)'):'rgba(255,255,255,0.02)',color:sel[p.name]===val?(val===0?C.muted:C.green):C.muted,transition:'all 0.15s'}}>{label}</button>
               ))}
             </div>
@@ -971,14 +1169,34 @@ function AddonScreen({players,onDone,onBack}) {
 // SCREEN: PRIZES
 // ════════════════════════════════════════════════════════
 function PrizesScreen({players,bank,onSettle,onBack}) {
-  const [prizes,setPrizes]   = usePersist('g_prizes',['','','']);
-  const [winners,setWinners] = usePersist('g_winners',['','','']);
-  const MEDALS=['🥇','🥈','🥉'];
+  const maxPlaces = Math.max(1,Math.min(5,players.length));
+  const initPlaces = Math.min(defaultPlaces(players.length),maxPlaces);
+  const [places,setPlacesRaw] = usePersist('g_places',initPlaces);
+  const [prizes,setPrizes]    = usePersist('g_prizes',()=>splitPrizes(bank,initPlaces).map(String));
+  // Места по порядку вылета: кто вылетел позже — тот выше. Если за столом
+  // осталось несколько человек, их места выбирают вручную.
+  const [winners,setWinners]  = usePersist('g_winners',()=>{
+    const alive = players.filter(p=>!p.eliminated);
+    const out = players.filter(p=>p.eliminated).sort((a,b)=>(b.elimAt||0)-(a.elimAt||0));
+    const w = Array(5).fill('');
+    if(alive.length===1) w[0]=alive[0].name;
+    out.forEach((p,i)=>{ const k=alive.length+i; if(k<5) w[k]=p.name; });
+    return w;
+  });
+  const MEDALS=['🥇','🥈','🥉','4.','5.'];
+  const setPlaces = n => { setPlacesRaw(n); setPrizes(splitPrizes(bank,n).map(String)); };
 
-  const pool  = bank;
-  const total = prizes.reduce((s,v)=>s+(parseInt(v)||0),0);
-  const diff  = pool-total;
-  const canCalc = winners[0] && (parseInt(prizes[0])||0)>0;
+  const amounts = prizes.slice(0,places).map(v=>parseInt(v)||0);
+  const total = amounts.reduce((s,v)=>s+v,0);
+  const diff  = bank-total;
+  const chosen = winners.slice(0,places);
+  const missing = chosen.some((w,i)=>amounts[i]>0&&!w);
+  const dup = chosen.filter(Boolean).length !== new Set(chosen.filter(Boolean)).size;
+  const sumOk = Math.abs(diff)<1;
+  const canCalc = sumOk && !missing && !dup && amounts[0]>0;
+  const why = !sumOk ? (diff>0?`Нераспределено ${diff}₽`:`Перебор ${-diff}₽`) : missing ? 'Выберите всех призёров' : dup ? 'Один игрок выбран дважды' : '';
+  const card = {background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12};
+  const head = {color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,fontWeight:600};
 
   return (
     <div className="screen-anim" style={{flex:1,height:0,background:C.bg,display:'flex',flexDirection:'column',overflow:'hidden'}}>
@@ -986,40 +1204,46 @@ function PrizesScreen({players,bank,onSettle,onBack}) {
       <div className="scroll" style={{flex:1,padding:'0 16px 12px'}}>
         <StatBar items={[{label:'Призовой фонд',value:`${bank}₽`,accent:true},{label:'Игроков',value:players.length}]}/>
 
-        {/* Prize amounts */}
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
-          <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:12,fontWeight:600}}>🏆 Суммы призов</div>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
-              <span style={{fontSize:18,width:26}}>{MEDALS[i]}</span>
-              <Input type="number" value={prizes[i]} onChange={e=>setPrizes(p=>p.map((v,j)=>j===i?e.target.value:v))} placeholder="0" style={{flex:1}}/>
-              <span style={{color:C.muted,fontSize:14,flexShrink:0}}>₽</span>
-            </div>
-          ))}
-          {total>0 && (
-            <div style={{fontSize:13,marginTop:4,color:Math.abs(diff)<2?C.green:diff>0?'#ffa657':C.red}}>
-              {Math.abs(diff)<2?'✅ Сумма сходится':diff>0?`⚠️ Нераспределено: ${diff}₽`:`❌ Перебор: ${-diff}₽`}
-            </div>
-          )}
+        {/* Places */}
+        <div style={card}>
+          <div style={{...head,marginBottom:10}}>Платим мест</div>
+          <div style={{display:'flex',gap:6}}>
+            {Array.from({length:maxPlaces},(_,i)=>i+1).map(n=>(
+              <button key={n} onClick={()=>setPlaces(n)} style={{flex:1,padding:'9px 4px',borderRadius:9,fontSize:15,fontWeight:700,cursor:'pointer',border:`1.5px solid ${places===n?C.green:'rgba(255,255,255,0.08)'}`,background:places===n?'rgba(45,138,74,0.15)':'rgba(255,255,255,0.03)',color:places===n?C.green:C.muted}}>{n}</button>
+            ))}
+          </div>
+          <div style={{color:C.dimmer,fontSize:12,marginTop:8}}>Схема: {(PAYOUTS[places]||[]).join(' / ')}%</div>
         </div>
 
-        {/* Winners */}
-        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'14px',marginBottom:12}}>
-          <div style={{color:C.gold,fontSize:11,textTransform:'uppercase',letterSpacing:1,marginBottom:12,fontWeight:600}}>🎖 Победители</div>
-          {[0,1,2].map(i=>(
-            <div key={i} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
-              <span style={{fontSize:18,width:26}}>{MEDALS[i]}</span>
-              <select value={winners[i]} onChange={e=>setWinners(w=>w.map((v,j)=>j===i?e.target.value:v))} style={{flex:1,background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,color:winners[i]?C.cream:C.muted,padding:'11px 12px',fontSize:14,fontFamily:'Plus Jakarta Sans'}}>
-                <option value="">— выбери —</option>
+        {/* Places: amount + winner */}
+        <div style={card}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+            <span style={head}>🏆 Призёры</span>
+            <button onClick={()=>setPrizes(splitPrizes(bank,places).map(String))} style={{background:'transparent',border:'none',color:C.gold,fontSize:12,cursor:'pointer'}}>↻ по схеме</button>
+          </div>
+          {Array.from({length:places},(_,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+              <span style={{fontSize:i<3?18:14,width:26,color:C.muted,textAlign:'center',flexShrink:0}}>{MEDALS[i]}</span>
+              <select value={winners[i]||''} onChange={e=>setWinners(w=>w.map((v,j)=>j===i?e.target.value:v))} style={{flex:1,minWidth:0,background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,color:winners[i]?C.cream:C.muted,padding:'10px 8px',fontSize:14,fontFamily:'Plus Jakarta Sans'}}>
+                <option value="">— кто —</option>
                 {players.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}
               </select>
+              <Input type="number" value={prizes[i]??''} onChange={e=>setPrizes(p=>{const a=[...p];a[i]=e.target.value;return a;})} placeholder="0" style={{width:92,flex:'none',padding:'10px 8px',textAlign:'right'}}/>
+              <span style={{color:C.muted,fontSize:13,flexShrink:0}}>₽</span>
             </div>
           ))}
+          <div style={{fontSize:13,marginTop:4,color:sumOk?C.green:diff>0?'#ffa657':C.red,display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+            <span>{sumOk?'✅ Сумма сходится с банком':diff>0?`⚠️ Нераспределено: ${diff}₽`:`❌ Перебор: ${-diff}₽`}</span>
+            {!sumOk && amounts[0]+diff>0 && <button onClick={()=>setPrizes(p=>{const a=[...p];a[0]=String(amounts[0]+diff);return a;})} style={{background:'transparent',border:`1px solid ${C.borderBright}`,borderRadius:8,color:C.gold,fontSize:12,padding:'5px 8px',cursor:'pointer',flexShrink:0}}>{diff>0?`+${diff}₽ первому`:`${diff}₽ с первого`}</button>}
+          </div>
+          {dup && <div style={{color:C.red,fontSize:12,marginTop:6}}>Один игрок выбран на два места</div>}
+          <div style={{color:C.dimmer,fontSize:11,marginTop:8}}>Места подставлены по порядку вылетов — проверьте</div>
         </div>
       </div>
 
       <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
-        <Btn label="Рассчитать →" full onClick={()=>onSettle({winners,prizes:prizes.map(v=>parseInt(v)||0),players})} disabled={!canCalc}/>
+        {!canCalc && why && <div style={{color:'#ffa657',fontSize:12,textAlign:'center',marginBottom:6}}>{why}</div>}
+        <Btn label="Рассчитать →" full onClick={()=>onSettle({winners:chosen,prizes:amounts,players})} disabled={!canCalc}/>
       </div>
     </div>
   );
@@ -1036,18 +1260,38 @@ function CashFinalScreen({players,ratio,onDone,onBack}) {
   const rub  = v => Math.round((parseInt(v)||0)/ratio);
   const canDone = remaining.every(p=>(chips[p.name]??'')!=='');
 
+  const [mismatch,setMismatch] = React.useState(null);
+  const collect = () => players.map(p=>p.cashedOut?p:{...p,chips:parseInt(chips[p.name])||0,cashedOut:true});
+
+  // Кэш-аут в рублях. Банк делится пропорционально фишкам — так сумма всегда
+  // сходится с закупами (и при округлении, и при выбранном «разделить пропорционально»).
+  // Тех, кто уже рассчитался сразу, не трогаем: их сумма зафиксирована.
+  const finish = (diffChips) => {
+    const updated = collect();
+    const bank = updated.reduce((s,p)=>s+paid(p),0);
+    const out = Object.fromEntries(updated.map(p=>[p.name,Math.round((p.chips||0)/ratio)]));
+    const free = updated.filter(p=>!p.paidNow);
+    const target = bank - updated.filter(p=>p.paidNow).reduce((s,p)=>s+out[p.name],0);
+    const freeChips = free.reduce((s,p)=>s+(p.chips||0),0);
+    if(freeChips>0 && target>=0){
+      free.forEach(p=>{ out[p.name]=Math.round((p.chips||0)/freeChips*target); });
+      const top = free.reduce((a,b)=>(b.chips||0)>(a.chips||0)?b:a);
+      out[top.name] += target - free.reduce((s,p)=>s+out[p.name],0);
+    }
+    const withRub = updated.map(p=>({...p,outRub:out[p.name]}));
+    const bal={};
+    withRub.forEach(p=>{ bal[p.name]=p.outRub-paid(p); });
+    const paidNow = applyPaidNow(bal, withRub);
+    const note = diffChips ? `⚖️ Фишек ${diffChips>0?'не хватало':'было больше'} на ${Math.abs(diffChips)} — банк разделён пропорционально фишкам` : null;
+    onDone({players:withRub,bank,bal,ratio,paidNow,note});
+  };
   const handleDone = () => {
-    const updated = players.map(p=>{
-      if(p.cashedOut) return p;
-      return {...p,chips:parseInt(chips[p.name])||0,cashedOut:true};
-    });
-    const bank   = updated.reduce((s,p)=>s+paid(p),0);
+    const updated = collect();
     const chipsIn  = updated.reduce((s,p)=>s+paid(p)*ratio,0);
     const chipsOut = updated.reduce((s,p)=>s+(p.chips||0),0);
-    const bal={};
-    updated.forEach(p=>{ bal[p.name]=rub(p.chips||0)-paid(p); });
-    const paidNow = applyPaidNow(bal, updated);
-    onDone({players:updated,bank,bal,chipDiff:chipsIn-chipsOut,ratio,paidNow});
+    const diff = chipsIn-chipsOut;
+    // Разница меньше рубля — это округление, считаем сразу
+    if(Math.abs(diff)<ratio) finish(0); else setMismatch({diff,chipsIn,chipsOut});
   };
 
   return (
@@ -1088,6 +1332,23 @@ function CashFinalScreen({players,ratio,onDone,onBack}) {
       <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
         <Btn label="Рассчитать →" full onClick={handleDone} disabled={!canDone}/>
       </div>
+      {mismatch && (
+        <BottomSheet title="Фишки не сходятся" onClose={()=>setMismatch(null)}>
+          <div style={{color:C.cream,fontSize:14,lineHeight:1.5,marginBottom:6}}>
+            Куплено <b>{mismatch.chipsIn}</b> фишек, на столе <b>{mismatch.chipsOut}</b>.
+          </div>
+          <div style={{color:mismatch.diff>0?'#ffa657':C.red,fontSize:14,marginBottom:14}}>
+            {mismatch.diff>0?'Не хватает':'Лишних'} {Math.abs(mismatch.diff)} фишек (≈{Math.round(Math.abs(mismatch.diff)/ratio)}₽)
+          </div>
+          <div style={{color:C.dimmer,fontSize:12,marginBottom:14}}>
+            «Разделить пропорционально» — банк делится по фишкам: у кого больше фишек, тому больше разница. Итог сойдётся до рубля.
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            <Btn label="Пересчитать фишки" ghost full onClick={()=>setMismatch(null)}/>
+            <Btn label="Разделить пропорционально" full onClick={()=>{const d=mismatch.diff;setMismatch(null);finish(d);}}/>
+          </div>
+        </BottomSheet>
+      )}
     </div>
   );
 }
@@ -1096,6 +1357,27 @@ function CashFinalScreen({players,ratio,onDone,onBack}) {
 // SCREEN: SETTLEMENT
 // ════════════════════════════════════════════════════════
 function SettleScreen({title,summaries,transfers,paidTransfers,note,onNewGame,onBack,onEdit,backLabel}) {
+  const [toast,setToast] = React.useState('');
+  // Текст итогов для общего чата (Telegram и т.п.)
+  const shareText = () => {
+    const d = new Date().toLocaleDateString('ru-RU',{day:'numeric',month:'long'});
+    const L = [`🃏 ${title.replace(' — Расчёт','')} · ${d}`, ''];
+    summaries.forEach(s=>L.push(`${s.net>0?'🟢':s.net<0?'🔴':'⚪️'} ${s.name}: ${s.net>0?'+':''}${s.net}₽`));
+    L.push('');
+    if(transfers.length){ L.push('💸 Кто кому переводит:'); transfers.forEach(t=>L.push(`${t.from} → ${t.to}: ${t.amount}₽`)); }
+    else L.push('Все в расчёте 🎉');
+    if(paidTransfers?.length){ L.push('', '✅ Уже рассчитались:'); paidTransfers.forEach(t=>L.push(`${t.from} → ${t.to}: ${t.amount}₽`)); }
+    return L.join('\n');
+  };
+  const share = async () => {
+    const text = shareText();
+    if(navigator.share){
+      try { await navigator.share({text}); return; } catch(e){ if(e && e.name==='AbortError') return; }
+    }
+    try { await navigator.clipboard.writeText(text); setToast('Скопировано — вставьте в чат'); }
+    catch(e){ window.prompt('Скопируйте итоги:', text); }
+    setTimeout(()=>setToast(''),2500);
+  };
   const renderTransfer = (t,i,arr,isLast) => (
     <div key={i} style={{display:'flex',alignItems:'center',padding:'12px 14px',borderBottom:i<arr.length-1?`1px solid ${C.border}`:'none',gap:8}}>
       <span style={{color:C.red,fontWeight:600,fontSize:14}}>{t.from}</span>
@@ -1142,11 +1424,15 @@ function SettleScreen({title,summaries,transfers,paidTransfers,note,onNewGame,on
         </>}
       </div>
       <div style={{padding:'10px 16px 14px',background:C.bg,borderTop:`1px solid ${C.border}`,flexShrink:0}}>
+        {toast && <div style={{color:C.green,fontSize:13,textAlign:'center',marginBottom:8}}>✓ {toast}</div>}
         {onEdit && <div style={{display:'flex',gap:8,marginBottom:8}}>
           <Btn label={backLabel} ghost onClick={onBack} style={{flex:1,borderRadius:11,padding:'12px 8px',fontSize:14}}/>
           <Btn label="✎ Закупы" ghost onClick={onEdit} style={{flex:1,borderRadius:11,padding:'12px 8px',fontSize:14}}/>
         </div>}
-        <Btn label="Новая игра" full onClick={()=>{ if(!onEdit||confirm('Начать новую игру? Эту игру уже нельзя будет исправить.')) onNewGame(); }}/>
+        <div style={{display:'flex',gap:8}}>
+          <Btn label="📤 Поделиться" onClick={share} style={{flex:3,borderRadius:11}}/>
+          <Btn label="Новая игра" ghost onClick={()=>{ if(!onEdit||confirm('Начать новую игру? Эту игру уже нельзя будет исправить.')) onNewGame(); }} style={{flex:2,borderRadius:11,padding:'13px 8px',fontSize:14}}/>
+        </div>
       </div>
     </div>
   );
@@ -1206,18 +1492,18 @@ function App() {
     go('cashFinal');
   };
 
-  const handleCashEnd = ({players,bank,bal,chipDiff,ratio,paidNow}) => {
+  const handleCashEnd = ({players,bank,bal,ratio,paidNow,note}) => {
+    const outOf = p => p.outRub ?? Math.round((p.chips||0)/ratio);
     const summaries = [...players].sort((a,b)=>{
-      const an=Math.round((a.chips||0)/ratio)-a.buyins.reduce((s,b)=>s+b,0);
-      const bn=Math.round((b.chips||0)/ratio)-b.buyins.reduce((s,b)=>s+b,0);
+      const an=outOf(a)-a.buyins.reduce((s,b)=>s+b,0);
+      const bn=outOf(b)-b.buyins.reduce((s,b)=>s+b,0);
       return bn-an;
     }).map(p=>{
       const p2=p.buyins.reduce((s,b)=>s+b,0);
-      const rub=Math.round((p.chips||0)/ratio);
+      const rub=outOf(p);
       return {name:p.name,sub:`Закупы ${p2}₽  •  Кэш-аут ${rub}₽${p.paidNow?'  •  ушёл раньше':''}`,net:rub-p2};
     });
     const transfers = simplifyDebts(bal);
-    const note = chipDiff!==0?`⚠️ Расхождение ${Math.abs(chipDiff)} фишек — возможно кто-то пересчитал неверно`:null;
     setSettle({title:'Кэш — Расчёт',summaries,transfers,paidTransfers:paidNow||[],note});
     go('settle');
   };
@@ -1228,16 +1514,18 @@ function App() {
   };
 
   const handlePrizeSettle = ({winners,prizes,players}) => {
+    const t=tset(setup);
     const bal={};
-    players.forEach(p=>{ bal[p.name]=-(p.buyins[0]+p.rebuys*300+p.addon); });
-    [0,1,2].forEach(i=>{ if(winners[i]&&prizes[i]) bal[winners[i]]=(bal[winners[i]]||0)+prizes[i]; });
+    players.forEach(p=>{ bal[p.name]=-tournPaid(p,t); });
+    prizes.forEach((amt,i)=>{ if(winners[i]&&amt) bal[winners[i]]=(bal[winners[i]]||0)+amt; });
     // Итог игрока (до учёта расчётов «сразу») — для списка результатов
     const result={...bal};
     const paidNow=applyPaidNow(bal, players);
     const summaries=[...players].map(p=>{
-      const paid=p.buyins[0]+p.rebuys*300+p.addon;
-      const w=[0,1,2].reduce((s,i)=>s+(winners[i]===p.name?prizes[i]:0),0);
-      return {name:p.name,sub:`Заплатил ${paid}₽${w?`  •  Приз ${w}₽`:''}${p.paidNow?'  •  ушёл раньше':''}`,net:result[p.name]};
+      const paid=tournPaid(p,t);
+      const w=prizes.reduce((s,amt,i)=>s+(winners[i]===p.name?amt:0),0);
+      const place=winners.indexOf(p.name);
+      return {name:p.name,sub:`Заплатил ${paid}₽${w?`  •  ${place+1} место, приз ${w}₽`:''}${p.paidNow?'  •  ушёл раньше':''}`,net:result[p.name]};
     }).sort((a,b)=>b.net-a.net);
     const transfers=simplifyDebts(bal);
     setSettle({title:'Турнир — Расчёт',summaries,transfers,paidTransfers:paidNow,note:null});
@@ -1256,7 +1544,7 @@ function App() {
       case 'tourn':  return <TournamentScreen setup={setup} players={game.players} setPlayers={setPlayers} onBack={exitGame}
                        onAddon={()=>go('addon')}
                        onEnd={handleTournEnd}/>;
-      case 'addon':  return <AddonScreen players={game.players} onBack={()=>go('tourn')} onDone={handleAddonDone}/>;
+      case 'addon':  return <AddonScreen players={game.players} t={tset(setup)} onBack={()=>go('tourn')} onDone={handleAddonDone}/>;
       case 'prizes': return <PrizesScreen players={game.players} bank={game.bank||0} onBack={()=>go('tourn')} onSettle={handlePrizeSettle}/>;
       case 'settle': {
         // С экрана расчёта можно вернуться назад, поправить закупы/фишки/призы и пересчитать.
